@@ -1,0 +1,175 @@
+<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyHealthy | ครู</title>
+<script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script><link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700&display=swap" rel="stylesheet"><style>body{font-family:Kanit,sans-serif}.hide{display:none!important}.tab-active{background:#2563eb;color:#fff}</style></head>
+<body class="bg-slate-100 min-h-screen"><main class="max-w-5xl mx-auto p-5">
+<section id="login" class="max-w-md mx-auto mt-16 bg-white p-8 rounded-3xl shadow-xl">
+  <h1 class="text-3xl font-bold text-blue-600">🔒 Teacher Access</h1><p class="text-slate-500 mb-5">สำหรับบุคลากรห้องพยาบาล</p>
+  <input id="user" class="w-full border p-3 rounded-xl mb-3" placeholder="Username">
+  <input id="pass" type="password" class="w-full border p-3 rounded-xl mb-3" placeholder="รหัสผ่าน">
+  <input id="code" type="password" class="w-full border p-3 rounded-xl mb-4" placeholder="รหัสเข้าใช้งานพิเศษ (Access Code)">
+  <button onclick="loginTeacher()" class="w-full bg-blue-600 text-white p-3 rounded-xl font-bold">เข้าสู่ระบบ</button>
+  <p id="err" class="text-red-500 mt-3"></p>
+  <p class="text-xs text-slate-400 mt-4">ครั้งแรกให้สร้างบัญชีผ่าน /api/bootstrap-teacher (ต้องตั้งรหัสเข้าใช้งานพิเศษด้วย)</p>
+</section>
+<section id="app" class="hide">
+  <header class="flex justify-between items-center py-4"><div><h1 class="text-3xl font-bold">🏥 ห้องพยาบาล</h1><p class="text-green-600 text-sm">● Real-time Connected</p></div><button onclick="logout()" class="text-red-500">ออกจากระบบ</button></header>
+  <div class="flex gap-2 mb-4 flex-wrap">
+    <button id="tab-PENDING" onclick="setFilter('PENDING')" class="bg-white px-4 py-2 rounded-xl">รอประเมิน</button>
+    <button id="tab-SCHEDULED" onclick="setFilter('SCHEDULED')" class="bg-white px-4 py-2 rounded-xl">นัดแล้ว</button>
+    <button id="tab-ARRIVED" onclick="setFilter('ARRIVED')" class="bg-white px-4 py-2 rounded-xl">มาถึงแล้ว</button>
+    <button id="tab-DONE" onclick="setFilter('COMPLETED,REJECTED,CANCELLED')" class="bg-white px-4 py-2 rounded-xl">ปิดแล้ว</button>
+    <button id="tab-NOTIF" onclick="showNotifications()" class="bg-white px-4 py-2 rounded-xl">📨 แจ้งผู้ปกครอง <span id="notifBadge" class="hide bg-red-500 text-white text-xs rounded-full px-2">0</span></button>
+    <button id="tab-MEDS" onclick="showMedicines()" class="bg-white px-4 py-2 rounded-xl">💊 คลังยา</button>
+    <button id="tab-STUDENTS" onclick="showStudents()" class="bg-white px-4 py-2 rounded-xl">👨‍👩‍👧 รายชื่อนักเรียน</button>
+  </div>
+  <div id="list" class="space-y-4"></div>
+  <div id="notifPanel" class="hide space-y-3"></div>
+  <div id="studentsPanel" class="hide space-y-2"></div>
+  <div id="medsPanel" class="hide">
+    <div class="bg-white p-5 rounded-2xl shadow mb-4">
+      <h3 class="font-bold mb-3">➕ เพิ่มยาใหม่</h3>
+      <div class="flex gap-2 mb-3">
+        <input id="medName" class="flex-1 border p-2 rounded-xl" placeholder="ชื่อยา">
+        <input id="medDesc" class="flex-1 border p-2 rounded-xl" placeholder="คำอธิบาย (ถ้ามี)">
+      </div>
+      <p class="text-xs text-slate-400 mb-1">อาการที่ใช้ยานี้ได้ (เลือกจากรายการเดียวกับที่นักเรียนแจ้งอาการ กันสะกดไม่ตรง/สับสน):</p>
+      <div id="medSymptomChecks" class="flex flex-wrap gap-2 mb-3"></div>
+      <button onclick="addMedicine()" class="bg-blue-600 text-white px-5 py-2 rounded-xl font-bold">เพิ่มยา</button>
+    </div>
+    <div id="medsList" class="space-y-2"></div>
+  </div>
+</section></main>
+<div id="modal" onclick="if(event.target===this)closeModal()" class="hide fixed inset-0 bg-black/50 p-4 flex items-center justify-center"><div class="bg-white w-full max-w-lg p-6 rounded-3xl max-h-[90vh] overflow-y-auto"><h2 class="text-xl font-bold" id="mtitle"></h2><div id="minfo" class="my-3 p-3 bg-red-50 rounded-xl"></div><div id="lineBox" class="mb-3 p-3 bg-slate-50 rounded-xl text-sm flex justify-between items-center"><span id="lineStatus"></span><button onclick="editGuardianLine()" class="text-blue-600 text-xs border border-blue-300 px-2 py-1 rounded-full">🔗 ตั้งค่า LINE ผู้ปกครอง</button></div><div id="suggestBox" class="mb-2"></div><textarea id="assessment" class="w-full border p-3 rounded-xl mb-2" placeholder="ผลการประเมินเบื้องต้น (ครูตรวจสอบเอง)"></textarea><input id="when" type="datetime-local" class="w-full border p-3 rounded-xl mb-2"><textarea id="notes" class="w-full border p-3 rounded-xl mb-2" placeholder="บันทึกครู"></textarea><input id="medicine" class="w-full border p-3 rounded-xl mb-1" placeholder="ยาที่จ่าย (ตรวจสอบการแพ้ยาก่อน)"><div id="medSuggestBox" class="mb-3 flex flex-wrap"></div><div class="flex gap-2 flex-wrap"><button onclick="schedule()" class="flex-1 bg-blue-600 text-white p-3 rounded-xl">นัดหมาย</button><button onclick="arrive()" class="flex-1 bg-amber-500 text-white p-3 rounded-xl">มาถึง</button><button onclick="complete()" class="flex-1 bg-green-600 text-white p-3 rounded-xl">ปิดเคส</button></div><button onclick="rejectCase()" class="w-full mt-2 text-red-500 text-sm">ปิดเคสแบบไม่รับยา (แจ้งเตือนผิด/ซ้ำ)</button><button onclick="closeModal()" class="w-full mt-2 text-slate-500">ยกเลิก</button></div></div>
+<div id="symModal" onclick="if(event.target===this)closeSymModal()" class="hide fixed inset-0 bg-black/50 p-4 flex items-center justify-center"><div class="bg-white w-full max-w-md p-6 rounded-3xl"><h2 class="text-lg font-bold mb-3" id="symTitle"></h2><div id="symChecks" class="flex flex-wrap gap-2 mb-4"></div><div class="flex gap-2"><button onclick="saveSymptoms()" class="flex-1 bg-blue-600 text-white p-3 rounded-xl font-bold">บันทึก</button><button onclick="closeSymModal()" class="flex-1 text-slate-500">ยกเลิก</button></div></div></div>
+<script>
+// Teacher token is deliberately kept in-memory only (not localStorage) so a
+// teacher must enter username/password/access code every time the page is
+// opened or refreshed - no silent auto-login carried over between visits.
+const API='/api';let token='',filter='PENDING',current=null,socket,list_cache=[];
+let canonicalSymptoms=[],editingMedId=null,medRestHtml='';
+// Always-available way to dismiss the case modal: clicking the dark backdrop,
+// pressing Escape, or the "ยกเลิก" button all call this. This guards against
+// the dialog getting stuck open if an API call inside openCase() (e.g. the
+// /diagnose suggestion fetch) fails or hangs - the modal itself never
+// depended on that call succeeding, but there was previously no way to close
+// it except that one button.
+function closeModal(){modal.classList.add('hide')}
+function closeSymModal(){symModal.classList.add('hide');editingMedId=null}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeSymModal()}});
+function h(){return {'Content-Type':'application/json','Authorization':'Bearer '+token}}
+// Escape untrusted text (student-submitted symptoms/details, names, etc.)
+// before it is ever inserted via innerHTML. Never build innerHTML by
+// concatenating raw student/teacher input directly.
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+async function loginTeacher(){let r=await fetch(API+'/teacher/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user.value,password:pass.value,accessCode:code.value})}),d=await r.json();if(!r.ok){err.textContent=d.error;return}token=d.token;start()}
+async function start(){login.classList.add('hide');app.classList.remove('hide');
+  let r=await fetch(API+'/symptoms',{headers:h()});if(r.ok)canonicalSymptoms=await r.json();
+  setFilter('PENDING');socket=io({auth:{token}});socket.on('queue_update',refreshCurrentView);socket.on('appointment_update',refreshCurrentView);pollNotifBadge()}
+function refreshCurrentView(){if(!notifPanel.classList.contains('hide'))loadNotifications();else if(!medsPanel.classList.contains('hide'))loadMedicines();else load();pollNotifBadge()}
+function setActiveTab(id){['PENDING','SCHEDULED','ARRIVED','DONE','NOTIF','MEDS','STUDENTS'].forEach(t=>document.getElementById('tab-'+t).classList.remove('tab-active'));document.getElementById('tab-'+id).classList.add('tab-active')}
+function setFilter(f){filter=f;list.classList.remove('hide');notifPanel.classList.add('hide');medsPanel.classList.add('hide');studentsPanel.classList.add('hide');setActiveTab(f==='PENDING'?'PENDING':f==='SCHEDULED'?'SCHEDULED':f==='ARRIVED'?'ARRIVED':'DONE');load()}
+async function load(){let r=await fetch(API+'/requests?status='+filter,{headers:h()});if(!r.ok)return;let a=await r.json();list_cache=a;list.innerHTML=a.length?a.map((x,i)=>`<div class="bg-white p-5 rounded-2xl shadow border-l-8 ${x.severity==='มาก'?'border-red-500':x.severity==='กลาง'?'border-yellow-500':'border-green-500'}"><div class="flex justify-between"><div><b class="text-lg">${esc(x.name)} (${esc(x.class_name)})</b><p>${esc(x.tags.join(', '))}</p><p class="text-slate-500">${esc(x.details||'')}</p><span class="text-sm">ระดับ: ${esc(x.severity)} | ${esc(x.status)}</span></div><button onclick="openCase(${i})" class="bg-blue-600 text-white px-4 rounded-xl h-fit">จัดการ</button></div></div>`).join(''):'<div class="p-10 text-center text-slate-400">ไม่มีรายการ</div>'}
+// <input type="datetime-local"> only reports a value once EVERY sub-field
+// (year, month, day, hour, minute, and AM/PM where the locale uses 12h time)
+// has been filled in - if a teacher opens the picker and only sets the date,
+// or misses the AM/PM part, .value silently stays "" even though the box
+// looks "filled in" to them. That's what produced "ยังไม่ระบุเวลา" (time
+// not specified) even after the teacher thought they'd picked one. Starting
+// the field pre-filled with a valid value (instead of blank) means the
+// teacher only ever has to ADJUST an already-complete value, not assemble
+// one from scratch - so it can never end up half-filled.
+function defaultWhenValue(){let d=new Date(Date.now()+5*60000);d.setSeconds(0,0);d.setMinutes(Math.ceil(d.getMinutes()/5)*5);let p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`}
+async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.name+' | '+x.student_id;minfo.innerHTML='<b>⚠️ แพ้ยา:</b> '+esc(x.allergies||'ไม่มีข้อมูล')+'<br><b>อาการ:</b> '+esc(x.tags.join(', '));assessment.value=x.preliminary_assessment||'';when.value=x.appointment_at||defaultWhenValue();notes.value=x.teacher_notes||'';medicine.value='';suggestBox.innerHTML='';medSuggestBox.innerHTML='';modal.classList.remove('hide');
+  refreshLineBox(x.student_id);
+  // Decision-support: ask the backend's symptom rules for likely preliminary
+  // assessments based on the reported tags, and show them as suggestions the
+  // teacher can insert - this was previously computed server-side but never
+  // shown anywhere in the UI.
+  if(x.tags.length){let r=await fetch(API+'/diagnose?tags='+encodeURIComponent(x.tags.join(',')),{headers:h()});if(r.ok){let d=await r.json();if(d.assessments.length){suggestBox.innerHTML='<p class="text-xs text-slate-400 mb-1">คำแนะนำเบื้องต้น (ระบบช่วยประเมิน ไม่ใช่การวินิจฉัย ครูต้องตรวจสอบเอง):</p>'+d.assessments.map(s=>`<button type="button" onclick="addSuggestion(this)" class="mr-1 mb-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-full">+ ${esc(s)}</button>`).join('')}}}
+  // Medicine suggestions from the ยาในคลัง (medicine catalogue) so the
+  // teacher can tap instead of typing the name from memory. This is a
+  // convenience list only, not a prescription engine - a chip is just
+  // flagged red as a rough cross-check against the allergy text on file;
+  // the teacher must still verify before dispensing.
+  let mr=await fetch(API+'/medicines',{headers:h()});
+  medRestHtml='';
+  if(mr.ok){let meds=await mr.json();let allergyText=(x.allergies||'').toLowerCase().trim();
+    let chip=(n,risky,matched)=>`<button type="button" data-name="${esc(n)}" onclick="addMedSuggestion(this)" class="mr-1 mb-1 text-xs px-2 py-1 rounded-full border ${risky?'bg-red-50 text-red-700 border-red-300':matched?'bg-green-50 text-green-700 border-green-300 ring-1 ring-green-400':'bg-slate-50 text-slate-500 border-slate-200'}">${risky?'⚠️ ':matched?'✅ ':''}${esc(n)}</button>`;
+    let flagged=meds.map(m=>{let n=m.medicine_name,risky=allergyText&&(allergyText.includes(n.toLowerCase())||n.toLowerCase().includes(allergyText)),matched=m.symptoms.some(s=>x.tags.includes(s));return{n,risky,matched}});
+    // Narrow the picker down to what's relevant to the reported symptoms
+    // (plus anything allergy-risky, which must always stay visible for
+    // safety) so the teacher isn't scrolling the whole catalogue. Nothing
+    // is ever fully hidden - the rest of the catalogue is one tap away via
+    // "แสดงยาอื่น", and if no symptom was reported or nothing matches, the
+    // full list is shown right away instead of an empty/confusing box.
+    let head='<p class="text-xs text-slate-400 mb-1 w-full">ยาในคลัง (แตะเพื่อกรอก — เขียว = ตรงกับอาการที่แจ้ง, แดง = ระวังอาจแพ้ — ยังต้องตรวจสอบเองเสมอ):</p>';
+    if(!meds.length){medSuggestBox.innerHTML='<p class="text-xs text-slate-400">ยังไม่มีรายการยาในคลัง — เพิ่มได้ที่แท็บ 💊 คลังยา</p>';return}
+    let narrowed=flagged.filter(f=>f.matched||f.risky),rest=flagged.filter(f=>!f.matched&&!f.risky);
+    if(!x.tags.length||!narrowed.length){medSuggestBox.innerHTML=head+flagged.map(f=>chip(f.n,f.risky,f.matched)).join('');return}
+    medRestHtml=rest.map(f=>chip(f.n,f.risky,f.matched)).join('');
+    medSuggestBox.innerHTML=head+narrowed.map(f=>chip(f.n,f.risky,f.matched)).join('')+(rest.length?`<button type="button" id="moreMedsBtn" onclick="showAllMeds()" class="mr-1 mb-1 text-xs px-2 py-1 rounded-full border border-dashed border-slate-300 text-slate-500">+ แสดงยาอื่นอีก ${rest.length} รายการ</button>`:'')}}
+function showAllMeds(){let btn=document.getElementById('moreMedsBtn');if(btn)btn.remove();medSuggestBox.insertAdjacentHTML('beforeend',medRestHtml)}
+function addSuggestion(btn){let s=btn.textContent.replace(/^\+\s*/,'');assessment.value=assessment.value?assessment.value+', '+s:s}
+function addMedSuggestion(btn){medicine.value=btn.dataset.name}
+async function schedule(){
+  // Catch the "half-filled datetime-local" case client-side with a clear
+  // Thai message instead of letting it round-trip to the server and come
+  // back as the generic "กรุณาระบุเวลานัด" error.
+  if(!when.value){alert('กรุณาเลือกวันและเวลานัดหมายให้ครบทั้งสองช่อง (บางเบราว์เซอร์ต้องเลือกช่วงเช้า/บ่ายด้วย ไม่ใช่แค่วันที่)');when.focus();return}
+  await action('schedule',{appointmentAt:when.value,assessment:assessment.value,notes:notes.value});
+}
+async function arrive(){await action('arrive',{});}
+async function rejectCase(){let reason=prompt('เหตุผลที่ปิดเคสโดยไม่รับยา (แจ้งเตือนผิด/ซ้ำ ฯลฯ)','');if(reason===null)return;await action('reject',{reason});}
+async function complete(){if(!confirm('ยืนยันว่าตรวจสอบการแพ้ยาและจ่ายยาเรียบร้อยแล้ว?'))return;let r=await fetch(`${API}/appointment/${current.appointment_id}/complete`,{method:'POST',headers:h(),body:JSON.stringify({medicines:medicine.value?[{name:medicine.value,instruction:''}]:[]})}),d=await r.json();if(r.ok){alert('ปิดเคสแล้ว\nข้อความผู้ปกครองถูกสร้างเพื่อรอการอนุมัติ ดูได้ที่แท็บ "📨 แจ้งผู้ปกครอง":\n'+d.guardianMessage);modal.classList.add('hide');load();pollNotifBadge()}else alert(d.error||'ผิดพลาด')}
+async function action(a,b){let r=await fetch(`${API}/appointment/${current.appointment_id}/${a}`,{method:'POST',headers:h(),body:JSON.stringify(b)});if(r.ok){modal.classList.add('hide');load()}else alert((await r.json()).error||'ผิดพลาด')}
+
+// ---- guardian LINE linking (manual: school gives out its LINE OA, parent
+// adds it and sends back their LINE User ID, teacher pastes it in once) ----
+async function refreshLineBox(sid){let r=await fetch(API+'/student/'+sid,{headers:h()});if(!r.ok){lineStatus.textContent='';return}
+  let s=await r.json();lineStatus.innerHTML=s.guardian_line_user_id?'📱 ผูก LINE ผู้ปกครองแล้ว':'<span class="text-amber-600">📱 ยังไม่ได้ผูก LINE ผู้ปกครอง — ข้อความจะต้องส่งเองด้วยมือ</span>'}
+async function editGuardianLine(){if(!current)return;let cur=await (await fetch(API+'/student/'+current.student_id,{headers:h()})).json();
+  let val=prompt('วาง LINE User ID ของผู้ปกครอง (ได้จากผู้ปกครองที่แอด LINE OA ของโรงเรียนแล้ว)',cur.guardian_line_user_id||'');if(val===null)return;
+  let r=await fetch(`${API}/student/${current.student_id}/line`,{method:'POST',headers:h(),body:JSON.stringify({lineUserId:val.trim()})});
+  if(r.ok)refreshLineBox(current.student_id);else alert((await r.json()).error||'ผิดพลาด')}
+
+// ---- guardian notifications ----
+async function pollNotifBadge(){let r=await fetch(API+'/notifications',{headers:h()});if(!r.ok)return;let n=await r.json();notifBadge.textContent=n.length;notifBadge.classList.toggle('hide',n.length===0)}
+function showNotifications(){list.classList.add('hide');medsPanel.classList.add('hide');studentsPanel.classList.add('hide');notifPanel.classList.remove('hide');setActiveTab('NOTIF');loadNotifications()}
+async function loadNotifications(){let r=await fetch(API+'/notifications',{headers:h()});if(!r.ok)return;let n=await r.json();
+  notifPanel.innerHTML=n.length?n.map(x=>`<div class="bg-white p-5 rounded-2xl shadow"><b>${esc(x.name)} (${esc(x.class_name)})</b><p class="text-xs text-slate-400 mb-2">ผู้ปกครอง: ${esc(x.guardian_name||'-')} ${x.guardian_contact?'· '+esc(x.guardian_contact):''} · ${x.guardian_line_user_id?'<span class="text-green-600">📱 ผูก LINE แล้ว จะส่งอัตโนมัติเมื่ออนุมัติ</span>':'<span class="text-amber-600">📱 ยังไม่ผูก LINE — อนุมัติแล้วต้องส่งเอง</span>'}</p><textarea id="msg-${x.notification_id}" class="w-full border p-2 rounded-xl mb-2 text-sm">${esc(x.message)}</textarea><div class="flex gap-2"><button onclick="approveNotif(${x.notification_id})" class="flex-1 bg-green-600 text-white p-2 rounded-xl">✔ อนุมัติ${x.guardian_line_user_id?'และส่งผ่าน LINE':'/ทำเครื่องหมายว่าส่งแล้ว'}</button><button onclick="rejectNotif(${x.notification_id})" class="flex-1 bg-slate-400 text-white p-2 rounded-xl">✕ ไม่ต้องส่ง</button></div></div>`).join(''):'<div class="p-10 text-center text-slate-400 bg-white rounded-2xl">ไม่มีข้อความรอการอนุมัติ</div>';
+  pollNotifBadge()}
+async function approveNotif(id){let msg=document.getElementById('msg-'+id).value;let r=await fetch(`${API}/notifications/${id}/approve`,{method:'POST',headers:h(),body:JSON.stringify({message:msg})});let d=await r.json();if(!r.ok)return alert(d.error||'ผิดพลาด');
+  alert(d.lineSent?'✅ ส่งข้อความผ่าน LINE ให้ผู้ปกครองแล้ว':'⚠️ ยังไม่ได้ส่งผ่าน LINE อัตโนมัติ ('+(d.lineDetail||'')+')\nกรุณาส่งข้อความนี้เองผ่านช่องทางที่โรงเรียนใช้');
+  loadNotifications()}
+async function rejectNotif(id){let reason=prompt('เหตุผลที่ไม่ส่งข้อความนี้ (ถ้ามี)','');if(reason===null)return;let r=await fetch(`${API}/notifications/${id}/reject`,{method:'POST',headers:h(),body:JSON.stringify({reason})});if(r.ok)loadNotifications();else alert((await r.json()).error||'ผิดพลาด')}
+
+// ---- medicine catalogue ----
+// Symptom checkboxes are always rendered from canonicalSymptoms (fetched
+// once at login from /api/symptoms - the same list students pick from) so
+// a teacher can only ever tag a medicine with a symptom that actually
+// exists; there is deliberately no free-text symptom field anywhere here.
+function symptomChecksHtml(name,selected){selected=selected||[];return canonicalSymptoms.map(s=>`<label class="flex items-center gap-1 text-sm border px-2 py-1 rounded-full cursor-pointer ${selected.includes(s)?'bg-blue-50 border-blue-300':''}"><input type="checkbox" name="${name}" value="${esc(s)}" ${selected.includes(s)?'checked':''} class="accent-blue-600">${esc(s)}</label>`).join('')}
+function checkedValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(i=>i.value)}
+function showMedicines(){list.classList.add('hide');notifPanel.classList.add('hide');studentsPanel.classList.add('hide');medsPanel.classList.remove('hide');setActiveTab('MEDS');medSymptomChecks.innerHTML=symptomChecksHtml('newMedSym',[]);loadMedicines()}
+
+// ---- student roster (lets a teacher link a guardian's LINE User ID up
+// front, without needing to wait for that student's first appointment) ----
+function showStudents(){list.classList.add('hide');notifPanel.classList.add('hide');medsPanel.classList.add('hide');studentsPanel.classList.remove('hide');setActiveTab('STUDENTS');loadStudents()}
+async function loadStudents(){let r=await fetch(API+'/students',{headers:h()});if(!r.ok)return;let s=await r.json();
+  studentsPanel.innerHTML=s.length?s.map(x=>`<div class="bg-white p-4 rounded-2xl shadow flex justify-between items-center gap-3"><div><b>${esc(x.name)}</b> <span class="text-slate-500 text-sm">(${esc(x.class_name||'-')})</span><p class="text-xs text-slate-400">รหัส ${esc(x.student_id)} · ผู้ปกครอง: ${esc(x.guardian_name||'-')}${x.guardian_contact?' · '+esc(x.guardian_contact):''}</p><p class="text-xs mt-1">${x.guardian_line_user_id?'<span class="text-green-600">📱 ผูก LINE แล้ว</span>':'<span class="text-amber-600">📱 ยังไม่ได้ผูก LINE</span>'}</p></div><button data-sid="${esc(x.student_id)}" onclick="editGuardianLineForStudent(this)" class="shrink-0 text-blue-600 text-xs border border-blue-300 px-3 py-2 rounded-full">🔗 ตั้งค่า LINE</button></div>`).join(''):'<div class="p-10 text-center text-slate-400 bg-white rounded-2xl">ไม่พบข้อมูลนักเรียน</div>'}
+async function editGuardianLineForStudent(btn){let sid=btn.dataset.sid;let cur=await (await fetch(API+'/student/'+sid,{headers:h()})).json();
+  let val=prompt('วาง LINE User ID ของผู้ปกครอง (ได้จากผู้ปกครองที่แอด LINE OA ของโรงเรียนแล้ว)',cur.guardian_line_user_id||'');if(val===null)return;
+  let r=await fetch(`${API}/student/${sid}/line`,{method:'POST',headers:h(),body:JSON.stringify({lineUserId:val.trim()})});
+  if(r.ok)loadStudents();else alert((await r.json()).error||'ผิดพลาด')}
+async function loadMedicines(){let r=await fetch(API+'/medicines',{headers:h()});if(!r.ok)return;let m=await r.json();
+  medsList.innerHTML=m.length?m.map(x=>`<div class="bg-white p-4 rounded-xl shadow"><div class="flex justify-between items-start"><div><b>${esc(x.medicine_name)}</b><p class="text-sm text-slate-500">${esc(x.description||'')}</p></div><div class="flex gap-2 shrink-0"><button data-mid="${x.medicine_id}" data-mname="${esc(x.medicine_name)}" onclick="editSymptoms(this)" class="text-blue-600 text-sm border border-blue-300 px-2 py-1 rounded-full">แก้อาการที่ใช้</button><button onclick="deactivateMedicine(${x.medicine_id})" class="text-red-500 text-sm">ลบออกจากคลัง</button></div></div><div class="mt-2 flex flex-wrap gap-1">${x.symptoms.length?x.symptoms.map(s=>`<span class="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full">${esc(s)}</span>`).join(''):'<span class="text-xs text-slate-400">ยังไม่ได้จับคู่กับอาการใด</span>'}</div></div>`).join(''):'<div class="p-10 text-center text-slate-400 bg-white rounded-2xl">ยังไม่มีรายการยา</div>'}
+async function addMedicine(){if(!medName.value.trim())return;let r=await fetch(API+'/medicines',{method:'POST',headers:h(),body:JSON.stringify({name:medName.value,description:medDesc.value,symptoms:checkedValues('newMedSym')})});if(r.ok){medName.value='';medDesc.value='';medSymptomChecks.innerHTML=symptomChecksHtml('newMedSym',[]);loadMedicines()}else alert((await r.json()).error||'ผิดพลาด')}
+async function deactivateMedicine(id){if(!confirm('นำยานี้ออกจากคลัง?'))return;await fetch(`${API}/medicines/${id}/deactivate`,{method:'POST',headers:h()});loadMedicines()}
+async function editSymptoms(btn){let mid=Number(btn.dataset.mid);editingMedId=mid;symTitle.textContent='อาการที่ใช้กับ: '+btn.dataset.mname;
+  let r=await fetch(API+'/medicines',{headers:h()});let all=r.ok?await r.json():[];let med=all.find(m=>m.medicine_id===mid);
+  symChecks.innerHTML=symptomChecksHtml('editMedSym',med?med.symptoms:[]);symModal.classList.remove('hide')}
+async function saveSymptoms(){if(!editingMedId)return;let r=await fetch(`${API}/medicines/${editingMedId}/symptoms`,{method:'POST',headers:h(),body:JSON.stringify({symptoms:checkedValues('editMedSym')})});if(r.ok){closeSymModal();loadMedicines()}else alert((await r.json()).error||'ผิดพลาด')}
+
+async function logout(){await fetch(API+'/logout',{method:'POST',headers:h()});token='';location.reload()}
+// No auto-start on load: the login form (with username/password/access
+// code) always shows first, on every visit and every refresh.
+</script></body></html>

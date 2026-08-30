@@ -1,0 +1,44 @@
+<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MyHealthy | นักเรียน</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet"><style>body{font-family:Kanit,sans-serif}.hide{display:none!important}</style></head>
+<body class="bg-slate-100 min-h-screen"><main class="max-w-xl mx-auto p-5">
+<section id="login" class="mt-16 bg-white p-8 rounded-3xl shadow-xl"><h1 class="text-3xl font-bold text-blue-600">💙 MyHealthy</h1><p class="text-slate-500 mb-6">ระบบห้องพยาบาลสำหรับนักเรียน</p>
+<input id="sid" class="w-full border p-3 rounded-xl mb-3" placeholder="เลขประจำตัวนักเรียน"><input id="dob" type="date" class="w-full border p-3 rounded-xl mb-4">
+<button onclick="studentLogin()" class="w-full bg-blue-600 text-white p-3 rounded-xl font-bold">เข้าสู่ระบบ</button><p id="err" class="text-red-500 mt-3"></p></section>
+<section id="app" class="hide"><header class="flex justify-between items-center py-4"><div><h1 class="text-2xl font-bold">สวัสดี <span id="name"></span></h1><p id="class" class="text-slate-500"></p></div><button onclick="logout()" class="text-red-500">ออกจากระบบ</button></header>
+<div class="bg-white rounded-3xl p-6 shadow"><h2 class="font-bold text-xl mb-4">แจ้งอาการป่วย</h2><div id="tags" class="flex flex-wrap gap-2 mb-4"></div>
+<textarea id="details" class="w-full border rounded-xl p-3" rows="3" placeholder="รายละเอียดเพิ่มเติม"></textarea>
+<select id="severity" class="w-full border rounded-xl p-3 mt-3"><option value="">เลือกระดับความรุนแรง</option><option>น้อย</option><option>กลาง</option><option>มาก</option></select>
+<button onclick="send()" class="w-full mt-4 bg-blue-600 text-white p-3 rounded-xl font-bold">ส่งข้อมูลให้ห้องพยาบาล</button></div>
+<div class="bg-white rounded-3xl p-6 shadow mt-5"><div class="flex justify-between items-center"><h2 class="font-bold text-xl">สถานะล่าสุด</h2><button id="cancelBtn" onclick="cancelLatest()" class="hide text-sm text-red-500 border border-red-300 px-3 py-1 rounded-full">ยกเลิกคำขอ</button></div><div id="status" class="mt-3 text-slate-500">กำลังโหลด...</div></div>
+<div class="bg-white rounded-3xl p-6 shadow mt-5"><h2 class="font-bold text-xl mb-2">ประวัติการแจ้ง</h2><div id="history" class="space-y-2 text-sm text-slate-600"></div></div>
+</section></main>
+<script>
+const API='/api';let token=localStorage.myhealthy_student_token||'',selected=[],socket,latest=null;
+const symptoms=['ปวดหัว','ตัวร้อน','มีไข้','ปวดท้อง','ท้องเสีย','เจ็บคอ','ไอ','เวียนหัว','ผื่นคัน','บาดเจ็บ/มีแผล'];
+const STATUS_TH={PENDING:'รอครูตรวจสอบ',SCHEDULED:'นัดหมายแล้ว',ARRIVED:'มาถึงห้องพยาบาลแล้ว',COMPLETED:'เสร็จสิ้น',CANCELLED:'ยกเลิกแล้ว',REJECTED:'ครูปิดเคส (ไม่ใช่การรับยา)'};
+// Grab every element by id explicitly instead of relying on the browser's
+// "id becomes a global variable" behavior. Several ids here (name, status,
+// history) collide with real built-in window properties (window.name,
+// window.status, window.history), so the implicit globals silently point
+// at the WRONG thing and updates never reach the page - this is what broke
+// login/status/history rendering before.
+const $=document.getElementById.bind(document);
+const elLogin=$('login'),elApp=$('app'),elErr=$('err'),elSid=$('sid'),elDob=$('dob'),
+      elName=$('name'),elClass=$('class'),elTags=$('tags'),elDetails=$('details'),
+      elSeverity=$('severity'),elStatus=$('status'),elCancelBtn=$('cancelBtn'),elHistory=$('history');
+function headers(){return {'Content-Type':'application/json','Authorization':'Bearer '+token}}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function renderTags(){elTags.innerHTML=symptoms.map(s=>`<button onclick="toggle('${s}')" class="px-3 py-2 rounded-full border ${selected.includes(s)?'bg-blue-600 text-white':''}">${s}</button>`).join('')}
+function toggle(s){selected.includes(s)?selected=selected.filter(x=>x!==s):selected.push(s);renderTags()}
+async function studentLogin(){elErr.textContent='';let r,d;try{r=await fetch(API+'/student/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({studentId:elSid.value,dob:elDob.value})});d=await r.json()}catch(e){elErr.textContent='เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบว่าเปิดเซิร์ฟเวอร์ (python app.py) และเข้าเว็บผ่าน http://<เครื่อง>:5000/student.html แล้วหรือยัง';return}if(!r.ok){elErr.textContent=d.error||'เข้าสู่ระบบไม่สำเร็จ';return}token=d.token;localStorage.myhealthy_student_token=token;localStorage.myhealthy_student_name=d.name;localStorage.myhealthy_student_class=d.className;start()}
+function start(){elLogin.classList.add('hide');elApp.classList.remove('hide');elName.textContent=localStorage.myhealthy_student_name;elClass.textContent=localStorage.myhealthy_student_class;renderTags();load();try{socket=io({auth:{token}});socket.on('appointment_update',load);socket.on('queue_update',load)}catch(e){console.warn('Real-time connection unavailable:',e)}}
+async function send(){let r=await fetch(API+'/request',{method:'POST',headers:headers(),body:JSON.stringify({tags:selected,details:elDetails.value,severity:elSeverity.value})}),d=await r.json();if(!r.ok)return alert(d.error||'ส่งไม่สำเร็จ');selected=[];elDetails.value='';elSeverity.value='';renderTags();load()}
+async function cancelLatest(){if(!latest||!confirm('ยืนยันยกเลิกคำขอนี้?'))return;let r=await fetch(`${API}/appointment/${latest.appointment_id}/cancel`,{method:'POST',headers:headers()});if(!r.ok){let d=await r.json();return alert(d.error||'ยกเลิกไม่สำเร็จ')}load()}
+async function load(){let r=await fetch(API+'/my/requests',{headers:headers()});if(!r.ok)return;let all=await r.json();latest=all[0];
+  elStatus.innerHTML=!latest?'ยังไม่มีรายการ':`<b>${esc(STATUS_TH[latest.status]||latest.status)}</b><br>${latest.appointment_at?'เวลานัด: '+esc(latest.appointment_at):''}<br>${esc(latest.preliminary_assessment||'')}`;
+  elCancelBtn.classList.toggle('hide',!latest||latest.status!=='PENDING');
+  elHistory.innerHTML=all.slice(0,10).map(a=>`<div class="border-b pb-2"><b>${esc(STATUS_TH[a.status]||a.status)}</b> · ${esc(a.tags.join(', ')||a.details||'-')} <span class="text-xs text-slate-400">${esc(a.created_at)}</span></div>`).join('')||'<p class="text-slate-400">ไม่มีประวัติ</p>'}
+async function logout(){await fetch(API+'/logout',{method:'POST',headers:headers()});localStorage.removeItem('myhealthy_student_token');location.reload()}
+if(token)start();
+</script></body></html>
