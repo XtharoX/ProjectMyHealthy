@@ -601,9 +601,36 @@ def list_students(user):
 # ---------- symptoms (canonical list, used to tag medicines unambiguously) ----------
 
 @app.get("/api/symptoms")
-@require("teacher")
+@require(None)
 def symptoms_list(user):
+    # Open to both roles (not just teacher): students need this same list to
+    # report symptoms, so the two sides never drift apart the way a
+    # hardcoded copy in student.html used to risk.
     return jsonify([r["symptom"] for r in rows("SELECT symptom FROM symptoms ORDER BY rowid")])
+
+@app.post("/api/symptoms")
+@require("teacher")
+def add_symptom(user):
+    # Lets a teacher extend the canonical symptom list on the fly (e.g. a
+    # symptom that keeps coming up but isn't one of the original 10) instead
+    # of needing someone to edit db_setup.py and redeploy. Newly added
+    # symptoms immediately become available both for tagging medicines here
+    # and for students to pick when reporting - same table, same endpoint.
+    d = request.get_json() or {}
+    name = str(d.get("symptom", "")).strip()
+    if not name:
+        return jsonify(error="กรุณาระบุชื่ออาการ"), 400
+    if len(name) > 50:
+        return jsonify(error="ชื่ออาการยาวเกินไป"), 400
+    c = conn()
+    try:
+        c.execute("INSERT INTO symptoms(symptom) VALUES(?)", (name,))
+        c.commit()
+    except sqlite3.IntegrityError:
+        c.close(); return jsonify(error="มีอาการนี้อยู่แล้ว"), 409
+    c.close()
+    audit(user, "CREATE", "symptom", name)
+    return jsonify(ok=True), 201
 
 @app.get("/api/medicines")
 @require("teacher")

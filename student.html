@@ -15,7 +15,12 @@
 </section></main>
 <script>
 const API='/api';let token=localStorage.myhealthy_student_token||'',selected=[],socket,latest=null;
-const symptoms=['ปวดหัว','ตัวร้อน','มีไข้','ปวดท้อง','ท้องเสีย','เจ็บคอ','ไอ','เวียนหัว','ผื่นคัน','บาดเจ็บ/มีแผล'];
+// Default/fallback list, used immediately so the page never shows an empty
+// symptom picker. Overwritten right after login by the live list from
+// /api/symptoms (the same table teachers can add to via "+ เพิ่มอาการใหม่"),
+// so a symptom a teacher adds later shows up here automatically - but if
+// that fetch ever fails, this fallback keeps the form usable regardless.
+let symptoms=['ปวดหัว','ตัวร้อน','มีไข้','ปวดท้อง','ท้องเสีย','เจ็บคอ','ไอ','เวียนหัว','ผื่นคัน','บาดเจ็บ/มีแผล'];
 const STATUS_TH={PENDING:'รอครูตรวจสอบ',SCHEDULED:'นัดหมายแล้ว',ARRIVED:'มาถึงห้องพยาบาลแล้ว',COMPLETED:'เสร็จสิ้น',CANCELLED:'ยกเลิกแล้ว',REJECTED:'ครูปิดเคส (ไม่ใช่การรับยา)'};
 // Grab every element by id explicitly instead of relying on the browser's
 // "id becomes a global variable" behavior. Several ids here (name, status,
@@ -32,7 +37,8 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function renderTags(){elTags.innerHTML=symptoms.map(s=>`<button onclick="toggle('${s}')" class="px-3 py-2 rounded-full border ${selected.includes(s)?'bg-blue-600 text-white':''}">${s}</button>`).join('')}
 function toggle(s){selected.includes(s)?selected=selected.filter(x=>x!==s):selected.push(s);renderTags()}
 async function studentLogin(){elErr.textContent='';let r,d;try{r=await fetch(API+'/student/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({studentId:elSid.value,dob:elDob.value})});d=await r.json()}catch(e){elErr.textContent='เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบว่าเปิดเซิร์ฟเวอร์ (python app.py) และเข้าเว็บผ่าน http://<เครื่อง>:5000/student.html แล้วหรือยัง';return}if(!r.ok){elErr.textContent=d.error||'เข้าสู่ระบบไม่สำเร็จ';return}token=d.token;localStorage.myhealthy_student_token=token;localStorage.myhealthy_student_name=d.name;localStorage.myhealthy_student_class=d.className;start()}
-function start(){elLogin.classList.add('hide');elApp.classList.remove('hide');elName.textContent=localStorage.myhealthy_student_name;elClass.textContent=localStorage.myhealthy_student_class;renderTags();load();try{socket=io({auth:{token}});socket.on('appointment_update',load);socket.on('queue_update',load)}catch(e){console.warn('Real-time connection unavailable:',e)}}
+function start(){elLogin.classList.add('hide');elApp.classList.remove('hide');elName.textContent=localStorage.myhealthy_student_name;elClass.textContent=localStorage.myhealthy_student_class;renderTags();refreshSymptoms();load();try{socket=io({auth:{token}});socket.on('appointment_update',load);socket.on('queue_update',load)}catch(e){console.warn('Real-time connection unavailable:',e)}}
+async function refreshSymptoms(){try{let r=await fetch(API+'/symptoms',{headers:headers()});if(r.ok){let d=await r.json();if(Array.isArray(d)&&d.length){symptoms=d;renderTags()}}}catch(e){/* keep the fallback list on any network error */}}
 async function send(){let r=await fetch(API+'/request',{method:'POST',headers:headers(),body:JSON.stringify({tags:selected,details:elDetails.value,severity:elSeverity.value})}),d=await r.json();if(!r.ok)return alert(d.error||'ส่งไม่สำเร็จ');selected=[];elDetails.value='';elSeverity.value='';renderTags();load()}
 async function cancelLatest(){if(!latest||!confirm('ยืนยันยกเลิกคำขอนี้?'))return;let r=await fetch(`${API}/appointment/${latest.appointment_id}/cancel`,{method:'POST',headers:headers()});if(!r.ok){let d=await r.json();return alert(d.error||'ยกเลิกไม่สำเร็จ')}load()}
 async function load(){let r=await fetch(API+'/my/requests',{headers:headers()});if(!r.ok)return;let all=await r.json();latest=all[0];

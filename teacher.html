@@ -31,7 +31,7 @@
         <input id="medName" class="flex-1 border p-2 rounded-xl" placeholder="ชื่อยา">
         <input id="medDesc" class="flex-1 border p-2 rounded-xl" placeholder="คำอธิบาย (ถ้ามี)">
       </div>
-      <p class="text-xs text-slate-400 mb-1">อาการที่ใช้ยานี้ได้ (เลือกจากรายการเดียวกับที่นักเรียนแจ้งอาการ กันสะกดไม่ตรง/สับสน):</p>
+      <p class="text-xs text-slate-400 mb-1 flex items-center justify-between gap-2 flex-wrap"><span>อาการที่ใช้ยานี้ได้ (เลือกจากรายการเดียวกับที่นักเรียนแจ้งอาการ กันสะกดไม่ตรง/สับสน):</span><button type="button" onclick="addSymptom()" class="text-blue-600 whitespace-nowrap font-bold">+ เพิ่มอาการใหม่</button></p>
       <div id="medSymptomChecks" class="flex flex-wrap gap-2 mb-3"></div>
       <button onclick="addMedicine()" class="bg-blue-600 text-white px-5 py-2 rounded-xl font-bold">เพิ่มยา</button>
     </div>
@@ -162,6 +162,18 @@ async function rejectNotif(id){let reason=prompt('เหตุผลที่ไ
 // exists; there is deliberately no free-text symptom field anywhere here.
 function symptomChecksHtml(name,selected){selected=selected||[];return canonicalSymptoms.map(s=>`<label class="flex items-center gap-1 text-sm border px-2 py-1 rounded-full cursor-pointer ${selected.includes(s)?'bg-blue-50 border-blue-300':''}"><input type="checkbox" name="${name}" value="${esc(s)}" ${selected.includes(s)?'checked':''} class="accent-blue-600">${esc(s)}</label>`).join('')}
 function checkedValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(i=>i.value)}
+async function addSymptom(){
+  // Adds to the shared canonical `symptoms` table via /api/symptoms - the
+  // same list the student-facing page fetches, so a new symptom shows up
+  // for students to report it AND for tagging medicines here, right away.
+  let name=prompt('เพิ่มอาการใหม่ (จะใช้ได้ทั้งฝั่งนักเรียนแจ้งอาการ และแท็บยาในคลัง):','');
+  if(name===null)return;name=name.trim();if(!name)return;
+  let keepChecked=checkedValues('newMedSym');
+  let r=await fetch(API+'/symptoms',{method:'POST',headers:h(),body:JSON.stringify({symptom:name})});
+  if(!r.ok){let d=await r.json();return alert(d.error||'เพิ่มอาการไม่สำเร็จ')}
+  let sr=await fetch(API+'/symptoms',{headers:h()});if(sr.ok)canonicalSymptoms=await sr.json();
+  medSymptomChecks.innerHTML=symptomChecksHtml('newMedSym',keepChecked);
+}
 function showMedicines(){list.classList.add('hide');notifPanel.classList.add('hide');studentsPanel.classList.add('hide');medsPanel.classList.remove('hide');setActiveTab('MEDS');medSymptomChecks.innerHTML=symptomChecksHtml('newMedSym',[]);loadMedicines()}
 
 // ---- student roster (lets a teacher link a guardian's LINE User ID up
