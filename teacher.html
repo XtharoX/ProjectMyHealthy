@@ -38,14 +38,14 @@
     <div id="medsList" class="space-y-2"></div>
   </div>
 </section></main>
-<div id="modal" onclick="if(event.target===this)closeModal()" class="hide fixed inset-0 bg-black/50 p-4 flex items-center justify-center"><div class="bg-white w-full max-w-lg p-6 rounded-3xl max-h-[90vh] overflow-y-auto"><h2 class="text-xl font-bold" id="mtitle"></h2><div id="minfo" class="my-3 p-3 bg-red-50 rounded-xl"></div><div id="lineBox" class="mb-3 p-3 bg-slate-50 rounded-xl text-sm flex justify-between items-center"><span id="lineStatus"></span><button onclick="editGuardianLine()" class="text-blue-600 text-xs border border-blue-300 px-2 py-1 rounded-full">🔗 ตั้งค่า LINE ผู้ปกครอง</button></div><div id="suggestBox" class="mb-2"></div><textarea id="assessment" class="w-full border p-3 rounded-xl mb-2" placeholder="ผลการประเมินเบื้องต้น (ครูตรวจสอบเอง)"></textarea><input id="when" type="datetime-local" class="w-full border p-3 rounded-xl mb-2"><textarea id="notes" class="w-full border p-3 rounded-xl mb-2" placeholder="บันทึกครู"></textarea><input id="medicine" class="w-full border p-3 rounded-xl mb-1" placeholder="ยาที่จ่าย (ตรวจสอบการแพ้ยาก่อน)"><div id="medSuggestBox" class="mb-3 flex flex-wrap"></div><div class="flex gap-2 flex-wrap"><button onclick="schedule()" class="flex-1 bg-blue-600 text-white p-3 rounded-xl">นัดหมาย</button><button onclick="arrive()" class="flex-1 bg-amber-500 text-white p-3 rounded-xl">มาถึง</button><button onclick="complete()" class="flex-1 bg-green-600 text-white p-3 rounded-xl">ปิดเคส</button></div><button onclick="rejectCase()" class="w-full mt-2 text-red-500 text-sm">ปิดเคสแบบไม่รับยา (แจ้งเตือนผิด/ซ้ำ)</button><button onclick="closeModal()" class="w-full mt-2 text-slate-500">ยกเลิก</button></div></div>
+<div id="modal" onclick="if(event.target===this)closeModal()" class="hide fixed inset-0 bg-black/50 p-4 flex items-center justify-center"><div class="bg-white w-full max-w-lg p-6 rounded-3xl max-h-[90vh] overflow-y-auto"><h2 class="text-xl font-bold" id="mtitle"></h2><div id="minfo" class="my-3 p-3 bg-red-50 rounded-xl"></div><div id="lineBox" class="mb-3 p-3 bg-slate-50 rounded-xl text-sm flex justify-between items-center"><span id="lineStatus"></span><button onclick="editGuardianLine()" class="text-blue-600 text-xs border border-blue-300 px-2 py-1 rounded-full">🔗 ตั้งค่า LINE ผู้ปกครอง</button></div><div id="suggestBox" class="mb-2"></div><textarea id="assessment" class="w-full border p-3 rounded-xl mb-2" placeholder="ผลการประเมินเบื้องต้น (ครูตรวจสอบเอง)"></textarea><input id="when" type="datetime-local" class="w-full border p-3 rounded-xl mb-2"><textarea id="notes" class="w-full border p-3 rounded-xl mb-2" placeholder="บันทึกครู"></textarea><div class="flex gap-2 mb-1"><input id="medicine" class="flex-1 border p-3 rounded-xl" placeholder="พิมพ์ชื่อยาที่จ่าย แล้วกด + (เลือกได้มากกว่า 1 รายการ — ตรวจสอบการแพ้ยาก่อน)" onkeydown="if(event.key==='Enter'){event.preventDefault();addTypedMed()}"><button type="button" onclick="addTypedMed()" class="bg-slate-700 hover:bg-slate-800 text-white px-4 rounded-xl font-bold">+</button></div><div id="selectedMedsBox" class="mb-2 flex flex-wrap"></div><div id="medSuggestBox" class="mb-3 flex flex-wrap"></div><div class="flex gap-2 flex-wrap"><button onclick="schedule()" class="flex-1 bg-blue-600 text-white p-3 rounded-xl">นัดหมาย</button><button onclick="arrive()" class="flex-1 bg-amber-500 text-white p-3 rounded-xl">มาถึง</button><button onclick="complete()" class="flex-1 bg-green-600 text-white p-3 rounded-xl">ปิดเคส</button></div><button onclick="rejectCase()" class="w-full mt-2 text-red-500 text-sm">ปิดเคสแบบไม่รับยา (แจ้งเตือนผิด/ซ้ำ)</button><button onclick="closeModal()" class="w-full mt-2 text-slate-500">ยกเลิก</button></div></div>
 <div id="symModal" onclick="if(event.target===this)closeSymModal()" class="hide fixed inset-0 bg-black/50 p-4 flex items-center justify-center"><div class="bg-white w-full max-w-md p-6 rounded-3xl"><h2 class="text-lg font-bold mb-3" id="symTitle"></h2><div id="symChecks" class="flex flex-wrap gap-2 mb-4"></div><div class="flex gap-2"><button onclick="saveSymptoms()" class="flex-1 bg-blue-600 text-white p-3 rounded-xl font-bold">บันทึก</button><button onclick="closeSymModal()" class="flex-1 text-slate-500">ยกเลิก</button></div></div></div>
 <script>
 // Teacher token is deliberately kept in-memory only (not localStorage) so a
 // teacher must enter username/password/access code every time the page is
 // opened or refreshed - no silent auto-login carried over between visits.
 const API='/api';let token='',filter='PENDING',current=null,socket,list_cache=[];
-let canonicalSymptoms=[],editingMedId=null,medRestHtml='';
+let canonicalSymptoms=[],editingMedId=null,medRestHtml='',selectedMeds=[];
 // Always-available way to dismiss the case modal: clicking the dark backdrop,
 // pressing Escape, or the "ยกเลิก" button all call this. This guards against
 // the dialog getting stuck open if an API call inside openCase() (e.g. the
@@ -78,7 +78,7 @@ async function load(){let r=await fetch(API+'/requests?status='+filter,{headers:
 // teacher only ever has to ADJUST an already-complete value, not assemble
 // one from scratch - so it can never end up half-filled.
 function defaultWhenValue(){let d=new Date(Date.now()+5*60000);d.setSeconds(0,0);d.setMinutes(Math.ceil(d.getMinutes()/5)*5);let p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`}
-async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.name+' | '+x.student_id;minfo.innerHTML='<b>⚠️ แพ้ยา:</b> '+esc(x.allergies||'ไม่มีข้อมูล')+'<br><b>อาการ:</b> '+esc(x.tags.join(', '));assessment.value=x.preliminary_assessment||'';when.value=x.appointment_at||defaultWhenValue();notes.value=x.teacher_notes||'';medicine.value='';suggestBox.innerHTML='';medSuggestBox.innerHTML='';modal.classList.remove('hide');
+async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.name+' | '+x.student_id;minfo.innerHTML='<b>⚠️ แพ้ยา:</b> '+esc(x.allergies||'ไม่มีข้อมูล')+'<br><b>อาการ:</b> '+esc(x.tags.join(', '));assessment.value=x.preliminary_assessment||'';when.value=x.appointment_at||defaultWhenValue();notes.value=x.teacher_notes||'';medicine.value='';suggestBox.innerHTML='';medSuggestBox.innerHTML='';selectedMeds=[];renderSelectedMeds();modal.classList.remove('hide');
   refreshLineBox(x.student_id);
   // Decision-support: ask the backend's symptom rules for likely preliminary
   // assessments based on the reported tags, and show them as suggestions the
@@ -109,7 +109,16 @@ async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.na
     medSuggestBox.innerHTML=head+narrowed.map(f=>chip(f.n,f.risky,f.matched)).join('')+(rest.length?`<button type="button" id="moreMedsBtn" onclick="showAllMeds()" class="mr-1 mb-1 text-xs px-2 py-1 rounded-full border border-dashed border-slate-300 text-slate-500">+ แสดงยาอื่นอีก ${rest.length} รายการ</button>`:'')}}
 function showAllMeds(){let btn=document.getElementById('moreMedsBtn');if(btn)btn.remove();medSuggestBox.insertAdjacentHTML('beforeend',medRestHtml)}
 function addSuggestion(btn){let s=btn.textContent.replace(/^\+\s*/,'');assessment.value=assessment.value?assessment.value+', '+s:s}
-function addMedSuggestion(btn){medicine.value=btn.dataset.name}
+// Dispensing supports multiple medicines per case: tapping a suggestion
+// chip, or typing a name and pressing + / Enter, ADDS it to selectedMeds
+// (deduped) instead of overwriting a single field. Each chosen medicine
+// shows as a removable pill in selectedMedsBox; complete() sends the whole
+// list to the backend, which already accepts an array of {name,instruction}.
+function renderSelectedMeds(){selectedMedsBox.innerHTML=selectedMeds.length?selectedMeds.map((n,i)=>`<span class="mr-1 mb-1 text-xs pl-3 pr-1 py-1 rounded-full bg-blue-600 text-white flex items-center gap-1">${esc(n)}<button type="button" onclick="removeSelectedMed(${i})" class="ml-1 px-1 rounded-full hover:bg-blue-700" aria-label="ลบ">✕</button></span>`).join(''):'<p class="text-xs text-slate-400">ยังไม่ได้เลือกยา (แตะยาในคลังด้านล่าง หรือพิมพ์แล้วกด + )</p>'}
+function addMed(name){name=(name||'').trim();if(!name)return;if(!selectedMeds.includes(name))selectedMeds.push(name);renderSelectedMeds()}
+function addTypedMed(){addMed(medicine.value);medicine.value=''}
+function removeSelectedMed(i){selectedMeds.splice(i,1);renderSelectedMeds()}
+function addMedSuggestion(btn){addMed(btn.dataset.name)}
 async function schedule(){
   // Catch the "half-filled datetime-local" case client-side with a clear
   // Thai message instead of letting it round-trip to the server and come
@@ -119,7 +128,11 @@ async function schedule(){
 }
 async function arrive(){await action('arrive',{});}
 async function rejectCase(){let reason=prompt('เหตุผลที่ปิดเคสโดยไม่รับยา (แจ้งเตือนผิด/ซ้ำ ฯลฯ)','');if(reason===null)return;await action('reject',{reason});}
-async function complete(){if(!confirm('ยืนยันว่าตรวจสอบการแพ้ยาและจ่ายยาเรียบร้อยแล้ว?'))return;let r=await fetch(`${API}/appointment/${current.appointment_id}/complete`,{method:'POST',headers:h(),body:JSON.stringify({medicines:medicine.value?[{name:medicine.value,instruction:''}]:[]})}),d=await r.json();if(r.ok){alert('ปิดเคสแล้ว\nข้อความผู้ปกครองถูกสร้างเพื่อรอการอนุมัติ ดูได้ที่แท็บ "📨 แจ้งผู้ปกครอง":\n'+d.guardianMessage);modal.classList.add('hide');load();pollNotifBadge()}else alert(d.error||'ผิดพลาด')}
+async function complete(){if(!confirm('ยืนยันว่าตรวจสอบการแพ้ยาและจ่ายยาเรียบร้อยแล้ว?'))return;
+  // Pick up anything still sitting in the text box (typed but not yet added
+  // via + or Enter) so a teacher who forgets that last tap doesn't lose it.
+  addMed(medicine.value);medicine.value='';
+  let r=await fetch(`${API}/appointment/${current.appointment_id}/complete`,{method:'POST',headers:h(),body:JSON.stringify({medicines:selectedMeds.map(n=>({name:n,instruction:''}))})}),d=await r.json();if(r.ok){alert('ปิดเคสแล้ว\nข้อความผู้ปกครองถูกสร้างเพื่อรอการอนุมัติ ดูได้ที่แท็บ "📨 แจ้งผู้ปกครอง":\n'+d.guardianMessage);modal.classList.add('hide');load();pollNotifBadge()}else alert(d.error||'ผิดพลาด')}
 async function action(a,b){let r=await fetch(`${API}/appointment/${current.appointment_id}/${a}`,{method:'POST',headers:h(),body:JSON.stringify(b)});if(r.ok){modal.classList.add('hide');load()}else alert((await r.json()).error||'ผิดพลาด')}
 
 // ---- guardian LINE linking (manual: school gives out its LINE OA, parent
