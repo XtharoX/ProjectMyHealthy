@@ -113,6 +113,7 @@ SAFE_STATIC_EXT = {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".gif",
                     ".svg", ".ico", ".woff", ".woff2", ".webmanifest"}
 
 OPEN_STATUSES = ("PENDING", "SCHEDULED", "ARRIVED")
+CLOSED_STATUSES = ("COMPLETED", "REJECTED", "CANCELLED")
 
 def conn():
     c = sqlite3.connect(DB); c.row_factory = sqlite3.Row; return c
@@ -294,11 +295,23 @@ def teacher_requests(user):
     status = request.args.get("status")
     sql = """SELECT a.*,s.name,s.class_name,s.allergies FROM appointments a JOIN students s ON s.student_id=a.student_id"""
     args = []
+    statuses = []
     if status:
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         sql += " WHERE a.status IN (%s)" % ",".join("?" * len(statuses))
         args.extend(statuses)
-    sql += " ORDER BY CASE a.severity WHEN 'มาก' THEN 1 WHEN 'กลาง' THEN 2 ELSE 3 END,a.created_at DESC"
+    # The open queue (PENDING/SCHEDULED/ARRIVED) should triage by severity
+    # first so the most urgent case is always on top. But that same rule
+    # applied to the CLOSED history tab (COMPLETED/REJECTED/CANCELLED) meant
+    # a high-severity case stayed pinned at the top forever, and ties broke
+    # on created_at (when the case was first opened) instead of when it was
+    # actually closed - so a case closed just now could still land in the
+    # middle of the list. History should simply read most-recently-closed
+    # first, so use closed_at there instead of the severity/created_at rule.
+    if statuses and all(s in CLOSED_STATUSES for s in statuses):
+        sql += " ORDER BY a.closed_at DESC, a.appointment_id DESC"
+    else:
+        sql += " ORDER BY CASE a.severity WHEN 'มาก' THEN 1 WHEN 'กลาง' THEN 2 ELSE 3 END,a.created_at DESC"
     out = rows(sql, args)
     for x in out:
         x["tags"] = json.loads(x.pop("symptoms_json"))
@@ -434,13 +447,19 @@ def complete(user, aid):
         c.close(); return jsonify(error="เคสนี้ปิดแล้ว"), 400
     allergies = rows("SELECT allergies FROM students WHERE student_id=?", (r["student_id"],))[0]["allergies"]
     c.execute("UPDATE appointments SET status='COMPLETED',closed_at=CURRENT_TIMESTAMP WHERE appointment_id=?", (aid,))
+    given_names = []
     for m in meds:
         name = str(m.get("name", "")).strip()
         if name:
             c.execute("INSERT INTO appointment_medicines(appointment_id,medicine_name_snapshot,dosage_instruction,dispensed_by,dispensed_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)",
                        (aid, name, str(m.get("instruction", ""))[:500], user["user_id"]))
+            given_names.append(name)
     symptoms = ", ".join(json.loads(r["symptoms_json"]))
-    msg = f"นักเรียนเข้ารับบริการห้องพยาบาล เนื่องจากมีอาการ: {symptoms or r['details']}. ได้รับการดูแลเรียบร้อยแล้ว"
+    # The dispensed medicine list was built above but never made it into the
+    # guardian message - a teacher could pick a medicine, close the case, and
+    # the resulting notification would say nothing about what was given.
+    meds_line = f" ได้รับยา: {', '.join(given_names)}." if given_names else ""
+    msg = f"นักเรียนเข้ารับบริการห้องพยาบาล เนื่องจากมีอาการ: {symptoms or r['details']}.{meds_line} ได้รับการดูแลเรียบร้อยแล้ว"
     c.execute("INSERT INTO notifications(appointment_id,recipient_type,message,status) VALUES(?,?,?,?)",
                (aid, "GUARDIAN", msg, "PENDING_APPROVAL"))
     c.commit(); c.close()
