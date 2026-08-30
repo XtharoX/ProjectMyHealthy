@@ -1,0 +1,25 @@
+# Database - contains real student health/allergy data, guardian LINE IDs,
+# hashed passwords, and login tokens. Never commit this. Render (or wherever
+# you deploy) creates it fresh via `python db_setup.py` on first start.
+myhealthy.db
+*.db
+*.db-journal
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables, if you ever keep a local .env file
+.env
+
+# OS/editor clutter
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
