@@ -315,6 +315,21 @@ def teacher_requests(user):
     out = rows(sql, args)
     for x in out:
         x["tags"] = json.loads(x.pop("symptoms_json"))
+    # Attach whatever was actually dispensed for each case. This was tracked
+    # in appointment_medicines from the start (complete() already inserts
+    # into it), but /api/requests never selected it back out - so a closed
+    # case's medicine never had anywhere to surface in the teacher UI, even
+    # though it was sitting in the database the whole time.
+    if out:
+        ids = [x["appointment_id"] for x in out]
+        meds_by_appt = {}
+        for m in rows("""SELECT appointment_id,medicine_name_snapshot,dosage_instruction
+                          FROM appointment_medicines WHERE appointment_id IN (%s)
+                          ORDER BY id""" % ",".join("?" * len(ids)), ids):
+            meds_by_appt.setdefault(m["appointment_id"], []).append(
+                {"name": m["medicine_name_snapshot"], "instruction": m["dosage_instruction"]})
+        for x in out:
+            x["medicines"] = meds_by_appt.get(x["appointment_id"], [])
     return jsonify(out)
 
 @app.get("/api/my/requests")

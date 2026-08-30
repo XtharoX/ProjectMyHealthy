@@ -67,7 +67,11 @@ async function start(){login.classList.add('hide');app.classList.remove('hide');
 function refreshCurrentView(){if(!notifPanel.classList.contains('hide'))loadNotifications();else if(!medsPanel.classList.contains('hide'))loadMedicines();else load();pollNotifBadge()}
 function setActiveTab(id){['PENDING','SCHEDULED','ARRIVED','DONE','NOTIF','MEDS','STUDENTS'].forEach(t=>document.getElementById('tab-'+t).classList.remove('tab-active'));document.getElementById('tab-'+id).classList.add('tab-active')}
 function setFilter(f){filter=f;list.classList.remove('hide');notifPanel.classList.add('hide');medsPanel.classList.add('hide');studentsPanel.classList.add('hide');setActiveTab(f==='PENDING'?'PENDING':f==='SCHEDULED'?'SCHEDULED':f==='ARRIVED'?'ARRIVED':'DONE');load()}
-async function load(){let r=await fetch(API+'/requests?status='+filter,{headers:h()});if(!r.ok)return;let a=await r.json();list_cache=a;list.innerHTML=a.length?a.map((x,i)=>`<div class="bg-white p-5 rounded-2xl shadow border-l-8 ${x.severity==='มาก'?'border-red-500':x.severity==='กลาง'?'border-yellow-500':'border-green-500'}"><div class="flex justify-between"><div><b class="text-lg">${esc(x.name)} (${esc(x.class_name)})</b><p>${esc(x.tags.join(', '))}</p><p class="text-slate-500">${esc(x.details||'')}</p><span class="text-sm">ระดับ: ${esc(x.severity)} | ${esc(x.status)}</span></div><button onclick="openCase(${i})" class="bg-blue-600 text-white px-4 rounded-xl h-fit">จัดการ</button></div></div>`).join(''):'<div class="p-10 text-center text-slate-400">ไม่มีรายการ</div>'}
+// Medicines given for a case are only meaningful to show once it's closed
+// (schedule/arrive haven't dispensed anything yet), and only when something
+// was actually recorded - an empty/undefined list renders nothing extra.
+function medsLineHtml(x){if(!x.medicines||!x.medicines.length)return '';return `<p class="text-sm text-green-700 mt-1">💊 ยาที่ให้: ${esc(x.medicines.map(m=>m.name).join(', '))}</p>`}
+async function load(){let r=await fetch(API+'/requests?status='+filter,{headers:h()});if(!r.ok)return;let a=await r.json();list_cache=a;list.innerHTML=a.length?a.map((x,i)=>`<div class="bg-white p-5 rounded-2xl shadow border-l-8 ${x.severity==='มาก'?'border-red-500':x.severity==='กลาง'?'border-yellow-500':'border-green-500'}"><div class="flex justify-between"><div><b class="text-lg">${esc(x.name)} (${esc(x.class_name)})</b><p>${esc(x.tags.join(', '))}</p><p class="text-slate-500">${esc(x.details||'')}</p><span class="text-sm">ระดับ: ${esc(x.severity)} | ${esc(x.status)}</span>${medsLineHtml(x)}</div><button onclick="openCase(${i})" class="bg-blue-600 text-white px-4 rounded-xl h-fit">จัดการ</button></div></div>`).join(''):'<div class="p-10 text-center text-slate-400">ไม่มีรายการ</div>'}
 // <input type="datetime-local"> only reports a value once EVERY sub-field
 // (year, month, day, hour, minute, and AM/PM where the locale uses 12h time)
 // has been filled in - if a teacher opens the picker and only sets the date,
@@ -78,7 +82,12 @@ async function load(){let r=await fetch(API+'/requests?status='+filter,{headers:
 // teacher only ever has to ADJUST an already-complete value, not assemble
 // one from scratch - so it can never end up half-filled.
 function defaultWhenValue(){let d=new Date(Date.now()+5*60000);d.setSeconds(0,0);d.setMinutes(Math.ceil(d.getMinutes()/5)*5);let p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`}
-async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.name+' | '+x.student_id;minfo.innerHTML='<b>⚠️ แพ้ยา:</b> '+esc(x.allergies||'ไม่มีข้อมูล')+'<br><b>อาการ:</b> '+esc(x.tags.join(', '));assessment.value=x.preliminary_assessment||'';when.value=x.appointment_at||defaultWhenValue();notes.value=x.teacher_notes||'';medicine.value='';suggestBox.innerHTML='';medSuggestBox.innerHTML='';selectedMeds=[];renderSelectedMeds();modal.classList.remove('hide');
+async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.name+' | '+x.student_id;minfo.innerHTML='<b>⚠️ แพ้ยา:</b> '+esc(x.allergies||'ไม่มีข้อมูล')+'<br><b>อาการ:</b> '+esc(x.tags.join(', '));assessment.value=x.preliminary_assessment||'';when.value=x.appointment_at||defaultWhenValue();notes.value=x.teacher_notes||'';medicine.value='';suggestBox.innerHTML='';medSuggestBox.innerHTML='';
+  // Reopening an already-closed case (from the ปิดแล้ว/history tab) should
+  // show what was actually given, not a blank picker that looks like
+  // nothing was ever dispensed. For a case that's still open, there's
+  // nothing dispensed yet, so this is simply empty as before.
+  selectedMeds=(x.medicines||[]).map(m=>m.name);renderSelectedMeds();modal.classList.remove('hide');
   refreshLineBox(x.student_id);
   // Decision-support: ask the backend's symptom rules for likely preliminary
   // assessments based on the reported tags, and show them as suggestions the
