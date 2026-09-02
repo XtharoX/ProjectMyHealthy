@@ -41,15 +41,24 @@
 <div id="modal" onclick="if(event.target===this)closeModal()" class="hide fixed inset-0 bg-black/50 p-4 flex items-center justify-center"><div class="bg-white w-full max-w-lg p-6 rounded-3xl max-h-[90vh] overflow-y-auto"><h2 class="text-xl font-bold" id="mtitle"></h2><div id="minfo" class="my-3 p-3 bg-red-50 rounded-xl"></div><div id="lineBox" class="mb-3 p-3 bg-slate-50 rounded-xl text-sm flex justify-between items-center"><span id="lineStatus"></span><button onclick="editGuardianLine()" class="text-blue-600 text-xs border border-blue-300 px-2 py-1 rounded-full">🔗 ตั้งค่า LINE ผู้ปกครอง</button></div><div id="suggestBox" class="mb-2"></div><textarea id="assessment" class="w-full border p-3 rounded-xl mb-2" placeholder="ผลการประเมินเบื้องต้น (ครูตรวจสอบเอง)"></textarea><input id="when" type="datetime-local" class="w-full border p-3 rounded-xl mb-2"><textarea id="notes" class="w-full border p-3 rounded-xl mb-2" placeholder="บันทึกครู"></textarea><div class="flex gap-2 mb-1"><input id="medicine" class="flex-1 border p-3 rounded-xl" placeholder="พิมพ์ชื่อยาที่จ่าย แล้วกด + (เลือกได้มากกว่า 1 รายการ — ตรวจสอบการแพ้ยาก่อน)" onkeydown="if(event.key==='Enter'){event.preventDefault();addTypedMed()}"><button type="button" onclick="addTypedMed()" class="bg-slate-700 hover:bg-slate-800 text-white px-4 rounded-xl font-bold">+</button></div><div id="selectedMedsBox" class="mb-2 flex flex-wrap"></div><div id="medSuggestBox" class="mb-3 flex flex-wrap"></div><div class="flex gap-2 flex-wrap"><button onclick="schedule()" class="flex-1 bg-blue-600 text-white p-3 rounded-xl">นัดหมาย</button><button onclick="arrive()" class="flex-1 bg-amber-500 text-white p-3 rounded-xl">มาถึง</button><button onclick="complete()" class="flex-1 bg-green-600 text-white p-3 rounded-xl">ปิดเคส</button></div><button onclick="rejectCase()" class="w-full mt-2 text-red-500 text-sm">ปิดเคสแบบไม่รับยา (แจ้งเตือนผิด/ซ้ำ)</button><button onclick="closeModal()" class="w-full mt-2 text-slate-500">ยกเลิก</button></div></div>
 <div id="symModal" onclick="if(event.target===this)closeSymModal()" class="hide fixed inset-0 bg-black/50 p-4 flex items-center justify-center"><div class="bg-white w-full max-w-md p-6 rounded-3xl"><h2 class="text-lg font-bold mb-3" id="symTitle"></h2><div id="symChecks" class="flex flex-wrap gap-2 mb-4"></div><div class="flex gap-2"><button onclick="saveSymptoms()" class="flex-1 bg-blue-600 text-white p-3 rounded-xl font-bold">บันทึก</button><button onclick="closeSymModal()" class="flex-1 text-slate-500">ยกเลิก</button></div></div></div>
 <script>
-
+// Teacher token is deliberately kept in-memory only (not localStorage) so a
+// teacher must enter username/password/access code every time the page is
+// opened or refreshed - no silent auto-login carried over between visits.
 const API='/api';let token='',filter='PENDING',current=null,socket,list_cache=[];
 let canonicalSymptoms=[],editingMedId=null,medRestHtml='',selectedMeds=[];
-
+// Always-available way to dismiss the case modal: clicking the dark backdrop,
+// pressing Escape, or the "ยกเลิก" button all call this. This guards against
+// the dialog getting stuck open if an API call inside openCase() (e.g. the
+// /diagnose suggestion fetch) fails or hangs - the modal itself never
+// depended on that call succeeding, but there was previously no way to close
+// it except that one button.
 function closeModal(){modal.classList.add('hide')}
 function closeSymModal(){symModal.classList.add('hide');editingMedId=null}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeSymModal()}});
 function h(){return {'Content-Type':'application/json','Authorization':'Bearer '+token}}
-
+// Escape untrusted text (student-submitted symptoms/details, names, etc.)
+// before it is ever inserted via innerHTML. Never build innerHTML by
+// concatenating raw student/teacher input directly.
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function loginTeacher(){let r=await fetch(API+'/teacher/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user.value,password:pass.value,accessCode:code.value})}),d=await r.json();if(!r.ok){err.textContent=d.error;return}token=d.token;start()}
 async function start(){login.classList.add('hide');app.classList.remove('hide');
@@ -58,24 +67,79 @@ async function start(){login.classList.add('hide');app.classList.remove('hide');
 function refreshCurrentView(){if(!notifPanel.classList.contains('hide'))loadNotifications();else if(!medsPanel.classList.contains('hide'))loadMedicines();else load();pollNotifBadge()}
 function setActiveTab(id){['PENDING','SCHEDULED','ARRIVED','DONE','NOTIF','MEDS','STUDENTS'].forEach(t=>document.getElementById('tab-'+t).classList.remove('tab-active'));document.getElementById('tab-'+id).classList.add('tab-active')}
 function setFilter(f){filter=f;list.classList.remove('hide');notifPanel.classList.add('hide');medsPanel.classList.add('hide');studentsPanel.classList.add('hide');setActiveTab(f==='PENDING'?'PENDING':f==='SCHEDULED'?'SCHEDULED':f==='ARRIVED'?'ARRIVED':'DONE');load()}
-
+// Medicines given for a case are only meaningful to show once it's closed
+// (schedule/arrive haven't dispensed anything yet), and only when something
+// was actually recorded - an empty/undefined list renders nothing extra.
 function medsLineHtml(x){if(!x.medicines||!x.medicines.length)return '';return `<p class="text-sm text-green-700 mt-1">💊 ยาที่ให้: ${esc(x.medicines.map(m=>m.name).join(', '))}</p>`}
 async function load(){let r=await fetch(API+'/requests?status='+filter,{headers:h()});if(!r.ok)return;let a=await r.json();list_cache=a;list.innerHTML=a.length?a.map((x,i)=>`<div class="bg-white p-5 rounded-2xl shadow border-l-8 ${x.severity==='มาก'?'border-red-500':x.severity==='กลาง'?'border-yellow-500':'border-green-500'}"><div class="flex justify-between"><div><b class="text-lg">${esc(x.name)} (${esc(x.class_name)})</b><p>${esc(x.tags.join(', '))}</p><p class="text-slate-500">${esc(x.details||'')}</p><span class="text-sm">ระดับ: ${esc(x.severity)} | ${esc(x.status)}</span>${medsLineHtml(x)}</div><button onclick="openCase(${i})" class="bg-blue-600 text-white px-4 rounded-xl h-fit">จัดการ</button></div></div>`).join(''):'<div class="p-10 text-center text-slate-400">ไม่มีรายการ</div>'}
-
+// <input type="datetime-local"> only reports a value once EVERY sub-field
+// (year, month, day, hour, minute, and AM/PM where the locale uses 12h time)
+// has been filled in - if a teacher opens the picker and only sets the date,
+// or misses the AM/PM part, .value silently stays "" even though the box
+// looks "filled in" to them. That's what produced "ยังไม่ระบุเวลา" (time
+// not specified) even after the teacher thought they'd picked one. Starting
+// the field pre-filled with a valid value (instead of blank) means the
+// teacher only ever has to ADJUST an already-complete value, not assemble
+// one from scratch - so it can never end up half-filled.
 function defaultWhenValue(){let d=new Date(Date.now()+5*60000);d.setSeconds(0,0);d.setMinutes(Math.ceil(d.getMinutes()/5)*5);let p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`}
-async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.name+' | '+x.student_id;minfo.innerHTML='<b>⚠️ แพ้ยา:</b> '+esc(x.allergies||'ไม่มีข้อมูล')+'<br><b>อาการ:</b> '+esc(x.tags.join(', '));assessment.value=x.preliminary_assessment||'';when.value=x.appointment_at||defaultWhenValue();notes.value=x.teacher_notes||'';medicine.value='';suggestBox.innerHTML='';medSuggestBox.innerHTML='';
-
+// <input type="datetime-local">'s .value ("2026-09-02T22:35") carries no
+// timezone info at all - it's just raw digits. Sending that raw string to
+// the server and having a DIFFERENT device's browser re-parse it later
+// relies on every browser/WebView agreeing that "no timezone = this
+// reader's own local time" - which real-world engines (older mobile
+// Safari, in-app WebViews like LINE's, etc.) don't always agree on
+// consistently. That mismatch is what silently shifted a teacher's chosen
+// time by a couple hours on the student's screen. Fixing this at the
+// SOURCE: attach this device's actual UTC offset before sending, so the
+// string becomes a fully-qualified, unambiguous instant (e.g.
+// "2026-09-02T22:35:00+07:00") that every spec-compliant engine resolves
+// to the exact same moment, no matter which device reads it back.
+function toOffsetISO(localVal){
+  let d=new Date(localVal);
+  if(isNaN(d))return localVal;
+  let offMin=-d.getTimezoneOffset(),sign=offMin>=0?'+':'-',abs=Math.abs(offMin);
+  let p=n=>String(n).padStart(2,'0');
+  return `${localVal}:00${sign}${p(Math.floor(abs/60))}:${p(abs%60)}`;
+}
+// Inverse: turn a stored appointment_at (offset-qualified going forward,
+// or a legacy naive string from before this fix) back into the
+// "YYYY-MM-DDTHH:mm" shape datetime-local inputs require, expressed in
+// THIS device's own local time - so reopening a case always shows the
+// correct wall-clock time regardless of which device originally scheduled it.
+function toLocalInputValue(iso){
+  let d=new Date(iso);
+  if(isNaN(d))return defaultWhenValue();
+  let p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.name+' | '+x.student_id;minfo.innerHTML='<b>⚠️ แพ้ยา:</b> '+esc(x.allergies||'ไม่มีข้อมูล')+'<br><b>อาการ:</b> '+esc(x.tags.join(', '));assessment.value=x.preliminary_assessment||'';when.value=x.appointment_at?toLocalInputValue(x.appointment_at):defaultWhenValue();notes.value=x.teacher_notes||'';medicine.value='';suggestBox.innerHTML='';medSuggestBox.innerHTML='';
+  // Reopening an already-closed case (from the ปิดแล้ว/history tab) should
+  // show what was actually given, not a blank picker that looks like
+  // nothing was ever dispensed. For a case that's still open, there's
+  // nothing dispensed yet, so this is simply empty as before.
   selectedMeds=(x.medicines||[]).map(m=>m.name);renderSelectedMeds();modal.classList.remove('hide');
   refreshLineBox(x.student_id);
- 
+  // Decision-support: ask the backend's symptom rules for likely preliminary
+  // assessments based on the reported tags, and show them as suggestions the
+  // teacher can insert - this was previously computed server-side but never
+  // shown anywhere in the UI.
   if(x.tags.length){let r=await fetch(API+'/diagnose?tags='+encodeURIComponent(x.tags.join(',')),{headers:h()});if(r.ok){let d=await r.json();if(d.assessments.length){suggestBox.innerHTML='<p class="text-xs text-slate-400 mb-1">คำแนะนำเบื้องต้น (ระบบช่วยประเมิน ไม่ใช่การวินิจฉัย ครูต้องตรวจสอบเอง):</p>'+d.assessments.map(s=>`<button type="button" onclick="addSuggestion(this)" class="mr-1 mb-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-full">+ ${esc(s)}</button>`).join('')}}}
-  
+  // Medicine suggestions from the ยาในคลัง (medicine catalogue) so the
+  // teacher can tap instead of typing the name from memory. This is a
+  // convenience list only, not a prescription engine - a chip is just
+  // flagged red as a rough cross-check against the allergy text on file;
+  // the teacher must still verify before dispensing.
   let mr=await fetch(API+'/medicines',{headers:h()});
   medRestHtml='';
   if(mr.ok){let meds=await mr.json();let allergyText=(x.allergies||'').toLowerCase().trim();
     let chip=(n,risky,matched)=>`<button type="button" data-name="${esc(n)}" onclick="addMedSuggestion(this)" class="mr-1 mb-1 text-xs px-2 py-1 rounded-full border ${risky?'bg-red-50 text-red-700 border-red-300':matched?'bg-green-50 text-green-700 border-green-300 ring-1 ring-green-400':'bg-slate-50 text-slate-500 border-slate-200'}">${risky?'⚠️ ':matched?'✅ ':''}${esc(n)}</button>`;
     let flagged=meds.map(m=>{let n=m.medicine_name,risky=allergyText&&(allergyText.includes(n.toLowerCase())||n.toLowerCase().includes(allergyText)),matched=m.symptoms.some(s=>x.tags.includes(s));return{n,risky,matched}});
-    
+    // Narrow the picker down to what's relevant to the reported symptoms
+    // (plus anything allergy-risky, which must always stay visible for
+    // safety) so the teacher isn't scrolling the whole catalogue. Nothing
+    // is ever fully hidden - the rest of the catalogue is one tap away via
+    // "แสดงยาอื่น", and if no symptom was reported or nothing matches, the
+    // full list is shown right away instead of an empty/confusing box.
     let head='<p class="text-xs text-slate-400 mb-1 w-full">ยาในคลัง (แตะเพื่อกรอก — เขียว = ตรงกับอาการที่แจ้ง, แดง = ระวังอาจแพ้ — ยังต้องตรวจสอบเองเสมอ):</p>';
     if(!meds.length){medSuggestBox.innerHTML='<p class="text-xs text-slate-400">ยังไม่มีรายการยาในคลัง — เพิ่มได้ที่แท็บ 💊 คลังยา</p>';return}
     let narrowed=flagged.filter(f=>f.matched||f.risky),rest=flagged.filter(f=>!f.matched&&!f.risky);
@@ -84,26 +148,34 @@ async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.na
     medSuggestBox.innerHTML=head+narrowed.map(f=>chip(f.n,f.risky,f.matched)).join('')+(rest.length?`<button type="button" id="moreMedsBtn" onclick="showAllMeds()" class="mr-1 mb-1 text-xs px-2 py-1 rounded-full border border-dashed border-slate-300 text-slate-500">+ แสดงยาอื่นอีก ${rest.length} รายการ</button>`:'')}}
 function showAllMeds(){let btn=document.getElementById('moreMedsBtn');if(btn)btn.remove();medSuggestBox.insertAdjacentHTML('beforeend',medRestHtml)}
 function addSuggestion(btn){let s=btn.textContent.replace(/^\+\s*/,'');assessment.value=assessment.value?assessment.value+', '+s:s}
-
+// Dispensing supports multiple medicines per case: tapping a suggestion
+// chip, or typing a name and pressing + / Enter, ADDS it to selectedMeds
+// (deduped) instead of overwriting a single field. Each chosen medicine
+// shows as a removable pill in selectedMedsBox; complete() sends the whole
+// list to the backend, which already accepts an array of {name,instruction}.
 function renderSelectedMeds(){selectedMedsBox.innerHTML=selectedMeds.length?selectedMeds.map((n,i)=>`<span class="mr-1 mb-1 text-xs pl-3 pr-1 py-1 rounded-full bg-blue-600 text-white flex items-center gap-1">${esc(n)}<button type="button" onclick="removeSelectedMed(${i})" class="ml-1 px-1 rounded-full hover:bg-blue-700" aria-label="ลบ">✕</button></span>`).join(''):'<p class="text-xs text-slate-400">ยังไม่ได้เลือกยา (แตะยาในคลังด้านล่าง หรือพิมพ์แล้วกด + )</p>'}
 function addMed(name){name=(name||'').trim();if(!name)return;if(!selectedMeds.includes(name))selectedMeds.push(name);renderSelectedMeds()}
 function addTypedMed(){addMed(medicine.value);medicine.value=''}
 function removeSelectedMed(i){selectedMeds.splice(i,1);renderSelectedMeds()}
 function addMedSuggestion(btn){addMed(btn.dataset.name)}
 async function schedule(){
-  
+  // Catch the "half-filled datetime-local" case client-side with a clear
+  // Thai message instead of letting it round-trip to the server and come
+  // back as the generic "กรุณาระบุเวลานัด" error.
   if(!when.value){alert('กรุณาเลือกวันและเวลานัดหมายให้ครบทั้งสองช่อง (บางเบราว์เซอร์ต้องเลือกช่วงเช้า/บ่ายด้วย ไม่ใช่แค่วันที่)');when.focus();return}
-  await action('schedule',{appointmentAt:when.value,assessment:assessment.value,notes:notes.value});
+  await action('schedule',{appointmentAt:toOffsetISO(when.value),assessment:assessment.value,notes:notes.value});
 }
 async function arrive(){await action('arrive',{});}
 async function rejectCase(){let reason=prompt('เหตุผลที่ปิดเคสโดยไม่รับยา (แจ้งเตือนผิด/ซ้ำ ฯลฯ)','');if(reason===null)return;await action('reject',{reason});}
 async function complete(){if(!confirm('ยืนยันว่าตรวจสอบการแพ้ยาและจ่ายยาเรียบร้อยแล้ว?'))return;
-  
+  // Pick up anything still sitting in the text box (typed but not yet added
+  // via + or Enter) so a teacher who forgets that last tap doesn't lose it.
   addMed(medicine.value);medicine.value='';
   let r=await fetch(`${API}/appointment/${current.appointment_id}/complete`,{method:'POST',headers:h(),body:JSON.stringify({medicines:selectedMeds.map(n=>({name:n,instruction:''}))})}),d=await r.json();if(r.ok){alert('ปิดเคสแล้ว\nข้อความผู้ปกครองถูกสร้างเพื่อรอการอนุมัติ ดูได้ที่แท็บ "📨 แจ้งผู้ปกครอง":\n'+d.guardianMessage);modal.classList.add('hide');load();pollNotifBadge()}else alert(d.error||'ผิดพลาด')}
 async function action(a,b){let r=await fetch(`${API}/appointment/${current.appointment_id}/${a}`,{method:'POST',headers:h(),body:JSON.stringify(b)});if(r.ok){modal.classList.add('hide');load()}else alert((await r.json()).error||'ผิดพลาด')}
 
-
+// ---- guardian LINE linking (manual: school gives out its LINE OA, parent
+// adds it and sends back their LINE User ID, teacher pastes it in once) ----
 async function refreshLineBox(sid){let r=await fetch(API+'/student/'+sid,{headers:h()});if(!r.ok){lineStatus.textContent='';return}
   let s=await r.json();lineStatus.innerHTML=s.guardian_line_user_id?'📱 ผูก LINE ผู้ปกครองแล้ว':'<span class="text-amber-600">📱 ยังไม่ได้ผูก LINE ผู้ปกครอง — ข้อความจะต้องส่งเองด้วยมือ</span>'}
 async function editGuardianLine(){if(!current)return;let cur=await (await fetch(API+'/student/'+current.student_id,{headers:h()})).json();
@@ -111,7 +183,7 @@ async function editGuardianLine(){if(!current)return;let cur=await (await fetch(
   let r=await fetch(`${API}/student/${current.student_id}/line`,{method:'POST',headers:h(),body:JSON.stringify({lineUserId:val.trim()})});
   if(r.ok)refreshLineBox(current.student_id);else alert((await r.json()).error||'ผิดพลาด')}
 
-
+// ---- guardian notifications ----
 async function pollNotifBadge(){let r=await fetch(API+'/notifications',{headers:h()});if(!r.ok)return;let n=await r.json();notifBadge.textContent=n.length;notifBadge.classList.toggle('hide',n.length===0)}
 function showNotifications(){list.classList.add('hide');medsPanel.classList.add('hide');studentsPanel.classList.add('hide');notifPanel.classList.remove('hide');setActiveTab('NOTIF');loadNotifications()}
 async function loadNotifications(){let r=await fetch(API+'/notifications',{headers:h()});if(!r.ok)return;let n=await r.json();
@@ -122,11 +194,17 @@ async function approveNotif(id){let msg=document.getElementById('msg-'+id).value
   loadNotifications()}
 async function rejectNotif(id){let reason=prompt('เหตุผลที่ไม่ส่งข้อความนี้ (ถ้ามี)','');if(reason===null)return;let r=await fetch(`${API}/notifications/${id}/reject`,{method:'POST',headers:h(),body:JSON.stringify({reason})});if(r.ok)loadNotifications();else alert((await r.json()).error||'ผิดพลาด')}
 
-
+// ---- medicine catalogue ----
+// Symptom checkboxes are always rendered from canonicalSymptoms (fetched
+// once at login from /api/symptoms - the same list students pick from) so
+// a teacher can only ever tag a medicine with a symptom that actually
+// exists; there is deliberately no free-text symptom field anywhere here.
 function symptomChecksHtml(name,selected){selected=selected||[];return canonicalSymptoms.map(s=>`<label class="flex items-center gap-1 text-sm border px-2 py-1 rounded-full cursor-pointer ${selected.includes(s)?'bg-blue-50 border-blue-300':''}"><input type="checkbox" name="${name}" value="${esc(s)}" ${selected.includes(s)?'checked':''} class="accent-blue-600">${esc(s)}</label>`).join('')}
 function checkedValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(i=>i.value)}
 async function addSymptom(){
-
+  // Adds to the shared canonical `symptoms` table via /api/symptoms - the
+  // same list the student-facing page fetches, so a new symptom shows up
+  // for students to report it AND for tagging medicines here, right away.
   let name=prompt('เพิ่มอาการใหม่ (จะใช้ได้ทั้งฝั่งนักเรียนแจ้งอาการ และแท็บยาในคลัง):','');
   if(name===null)return;name=name.trim();if(!name)return;
   let keepChecked=checkedValues('newMedSym');
@@ -137,7 +215,8 @@ async function addSymptom(){
 }
 function showMedicines(){list.classList.add('hide');notifPanel.classList.add('hide');studentsPanel.classList.add('hide');medsPanel.classList.remove('hide');setActiveTab('MEDS');medSymptomChecks.innerHTML=symptomChecksHtml('newMedSym',[]);loadMedicines()}
 
-
+// ---- student roster (lets a teacher link a guardian's LINE User ID up
+// front, without needing to wait for that student's first appointment) ----
 function showStudents(){list.classList.add('hide');notifPanel.classList.add('hide');medsPanel.classList.add('hide');studentsPanel.classList.remove('hide');setActiveTab('STUDENTS');loadStudents()}
 async function loadStudents(){let r=await fetch(API+'/students',{headers:h()});if(!r.ok)return;let s=await r.json();
   studentsPanel.innerHTML=s.length?s.map(x=>`<div class="bg-white p-4 rounded-2xl shadow flex justify-between items-center gap-3"><div><b>${esc(x.name)}</b> <span class="text-slate-500 text-sm">(${esc(x.class_name||'-')})</span><p class="text-xs text-slate-400">รหัส ${esc(x.student_id)} · ผู้ปกครอง: ${esc(x.guardian_name||'-')}${x.guardian_contact?' · '+esc(x.guardian_contact):''}</p><p class="text-xs mt-1">${x.guardian_line_user_id?'<span class="text-green-600">📱 ผูก LINE แล้ว</span>':'<span class="text-amber-600">📱 ยังไม่ได้ผูก LINE</span>'}</p></div><button data-sid="${esc(x.student_id)}" onclick="editGuardianLineForStudent(this)" class="shrink-0 text-blue-600 text-xs border border-blue-300 px-3 py-2 rounded-full">🔗 ตั้งค่า LINE</button></div>`).join(''):'<div class="p-10 text-center text-slate-400 bg-white rounded-2xl">ไม่พบข้อมูลนักเรียน</div>'}
@@ -155,5 +234,6 @@ async function editSymptoms(btn){let mid=Number(btn.dataset.mid);editingMedId=mi
 async function saveSymptoms(){if(!editingMedId)return;let r=await fetch(`${API}/medicines/${editingMedId}/symptoms`,{method:'POST',headers:h(),body:JSON.stringify({symptoms:checkedValues('editMedSym')})});if(r.ok){closeSymModal();loadMedicines()}else alert((await r.json()).error||'ผิดพลาด')}
 
 async function logout(){await fetch(API+'/logout',{method:'POST',headers:h()});token='';location.reload()}
-
+// No auto-start on load: the login form (with username/password/access
+// code) always shows first, on every visit and every refresh.
 </script></body></html>
