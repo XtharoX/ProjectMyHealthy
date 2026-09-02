@@ -15,19 +15,10 @@
 </section></main>
 <script>
 const API='/api';let token=localStorage.myhealthy_student_token||'',selected=[],socket,latest=null;
-// Default/fallback list, used immediately so the page never shows an empty
-// symptom picker. Overwritten right after login by the live list from
-// /api/symptoms (the same table teachers can add to via "+ เพิ่มอาการใหม่"),
-// so a symptom a teacher adds later shows up here automatically - but if
-// that fetch ever fails, this fallback keeps the form usable regardless.
+
 let symptoms=['ปวดหัว','ตัวร้อน','มีไข้','ปวดท้อง','ท้องเสีย','เจ็บคอ','ไอ','เวียนหัว','ผื่นคัน','บาดเจ็บ/มีแผล'];
 const STATUS_TH={PENDING:'รอครูตรวจสอบ',SCHEDULED:'นัดหมายแล้ว',ARRIVED:'มาถึงห้องพยาบาลแล้ว',COMPLETED:'เสร็จสิ้น',CANCELLED:'ยกเลิกแล้ว',REJECTED:'ครูปิดเคส (ไม่ใช่การรับยา)'};
-// Grab every element by id explicitly instead of relying on the browser's
-// "id becomes a global variable" behavior. Several ids here (name, status,
-// history) collide with real built-in window properties (window.name,
-// window.status, window.history), so the implicit globals silently point
-// at the WRONG thing and updates never reach the page - this is what broke
-// login/status/history rendering before.
+
 const $=document.getElementById.bind(document);
 const elLogin=$('login'),elApp=$('app'),elErr=$('err'),elSid=$('sid'),elDob=$('dob'),
       elName=$('name'),elClass=$('class'),elTags=$('tags'),elDetails=$('details'),
