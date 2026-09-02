@@ -121,7 +121,12 @@ async function load(){let r=await fetch(API+'/my/requests',{headers:headers()});
   // never show up on the student's screen. `all` is already sorted newest
   // first, so this still prefers the most recent OPEN case.
   const OPEN=['PENDING','SCHEDULED','ARRIVED'];
-  latest=all.find(a=>OPEN.includes(a.status))||all[0];
+  // Prefer an already-scheduled case when a teacher has set an appointment time.
+  // This prevents an older/newer pending case from hiding the scheduled case.
+  latest =
+    all.find(a => OPEN.includes(a.status) && a.appointment_at) ||
+    all.find(a => OPEN.includes(a.status)) ||
+    all[0];
   // The appointment time is the single most important thing on this screen
   // once a teacher has scheduled a slot - give it its own highlighted block
   // instead of a plain text line, so it can't be mistaken for a status label.
