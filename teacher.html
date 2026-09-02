@@ -55,6 +55,19 @@ let canonicalSymptoms=[],editingMedId=null,medRestHtml='',selectedMeds=[];
 function closeModal(){modal.classList.add('hide')}
 function closeSymModal(){symModal.classList.add('hide');editingMedId=null}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeSymModal()}});
+// Use explicit DOM references for the appointment controls. Relying on
+// <input id=...> becoming a window global is not reliable across browsers/WebViews,
+// and that can make the "นัดหมาย" button appear to do nothing.
+const modal=document.getElementById('modal');
+const mtitle=document.getElementById('mtitle');
+const minfo=document.getElementById('minfo');
+const assessment=document.getElementById('assessment');
+const when=document.getElementById('when');
+const notes=document.getElementById('notes');
+const medicine=document.getElementById('medicine');
+const suggestBox=document.getElementById('suggestBox');
+const medSuggestBox=document.getElementById('medSuggestBox');
+
 function h(){return {'Content-Type':'application/json','Authorization':'Bearer '+token}}
 // Escape untrusted text (student-submitted symptoms/details, names, etc.)
 // before it is ever inserted via innerHTML. Never build innerHTML by
@@ -162,13 +175,22 @@ function addTypedMed(){addMed(medicine.value);medicine.value=''}
 function removeSelectedMed(i){selectedMeds.splice(i,1);renderSelectedMeds()}
 function addMedSuggestion(btn){addMed(btn.dataset.name)}
 async function schedule(){
-  if(!when.value){
+  const appointmentAt=when.value.trim();
+  if(!appointmentAt){
     alert('กรุณาเลือกวันและเวลานัดหมายให้ครบทั้งสองช่อง');
     when.focus();
     return;
   }
-  // datetime-local is a school wall-clock value. Send it unchanged.
-  await action('schedule',{appointmentAt:when.value,assessment:assessment.value,notes:notes.value});
+  if(!current || !current.appointment_id){
+    alert('ไม่พบข้อมูลเคส กรุณาปิดหน้าต่างแล้วกด จัดการ ใหม่');
+    return;
+  }
+  try{
+    await action('schedule',{appointmentAt,assessment:assessment.value,notes:notes.value});
+  }catch(e){
+    console.error(e);
+    alert('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่');
+  }
 }
 async function arrive(){await action('arrive',{});}
 async function rejectCase(){let reason=prompt('เหตุผลที่ปิดเคสโดยไม่รับยา (แจ้งเตือนผิด/ซ้ำ ฯลฯ)','');if(reason===null)return;await action('reject',{reason});}
@@ -177,7 +199,18 @@ async function complete(){if(!confirm('ยืนยันว่าตรวจ�
   // via + or Enter) so a teacher who forgets that last tap doesn't lose it.
   addMed(medicine.value);medicine.value='';
   let r=await fetch(`${API}/appointment/${current.appointment_id}/complete`,{method:'POST',headers:h(),body:JSON.stringify({medicines:selectedMeds.map(n=>({name:n,instruction:''}))})}),d=await r.json();if(r.ok){alert('ปิดเคสแล้ว\nข้อความผู้ปกครองถูกสร้างเพื่อรอการอนุมัติ ดูได้ที่แท็บ "📨 แจ้งผู้ปกครอง":\n'+d.guardianMessage);modal.classList.add('hide');load();pollNotifBadge()}else alert(d.error||'ผิดพลาด')}
-async function action(a,b){let r=await fetch(`${API}/appointment/${current.appointment_id}/${a}`,{method:'POST',headers:h(),body:JSON.stringify(b)});if(r.ok){modal.classList.add('hide');load()}else alert((await r.json()).error||'ผิดพลาด')}
+async function action(a,b){
+  if(!current||!current.appointment_id){throw new Error('missing appointment');}
+  let r;
+  try{
+    r=await fetch(`${API}/appointment/${current.appointment_id}/${a}`,{method:'POST',headers:h(),body:JSON.stringify(b)});
+  }catch(e){throw e}
+  let d={};
+  try{d=await r.json()}catch(e){}
+  if(r.ok){modal.classList.add('hide');load();return d}
+  alert(d.error||'บันทึกไม่สำเร็จ');
+  return d;
+}
 
 // ---- guardian LINE linking (manual: school gives out its LINE OA, parent
 // adds it and sends back their LINE User ID, teacher pastes it in once) ----

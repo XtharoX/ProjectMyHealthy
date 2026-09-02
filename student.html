@@ -14,7 +14,14 @@
 <div class="bg-white rounded-3xl p-6 shadow mt-5"><h2 class="font-bold text-xl mb-2">ประวัติการแจ้ง</h2><div id="history" class="space-y-2 text-sm text-slate-600"></div></div>
 </section></main>
 <script>
-const API='/api';let token=localStorage.myhealthy_student_token||'',selected=[],socket,latest=null;
+const API='/api';
+// Never auto-login a student from a previous browser session. The role selector
+// should always open the student login form and require student ID + date of birth.
+// Old tokens are removed so an earlier test account cannot expose its history.
+localStorage.removeItem('myhealthy_student_token');
+localStorage.removeItem('myhealthy_student_name');
+localStorage.removeItem('myhealthy_student_class');
+let token='',selected=[],socket,latest=null;
 // Default/fallback list, used immediately so the page never shows an empty
 // symptom picker. Overwritten right after login by the live list from
 // /api/symptoms (the same table teachers can add to via "+ เพิ่มอาการใหม่"),
@@ -139,5 +146,6 @@ async function load(){let r=await fetch(API+'/my/requests',{headers:headers()});
   elCancelBtn.classList.toggle('hide',!latest||latest.status!=='PENDING');
   elHistory.innerHTML=all.slice(0,10).map(a=>`<div class="border-b pb-2"><b>${esc(STATUS_TH[a.status]||a.status)}</b> · ${esc(a.tags.join(', ')||a.details||'-')} <span class="text-xs text-slate-400">${fmtDT(a.created_at)}</span></div>`).join('')||'<p class="text-slate-400">ไม่มีประวัติ</p>'}
 async function logout(){await fetch(API+'/logout',{method:'POST',headers:headers()});localStorage.removeItem('myhealthy_student_token');location.reload()}
-if(token)start();
+// Do not auto-start from a stored token. Student must explicitly log in.
+
 </script></body></html>
