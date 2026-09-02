@@ -111,6 +111,8 @@ function toLocalInputValue(iso){
   const s=String(iso).trim();
   const m=s.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
   if(m)return m[1];
+  const n=s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
+  if(n)return `${n[1]}T${n[2]}`;
   return defaultWhenValue();
 }
 async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.name+' | '+x.student_id;minfo.innerHTML='<b>⚠️ แพ้ยา:</b> '+esc(x.allergies||'ไม่มีข้อมูล')+'<br><b>อาการ:</b> '+esc(x.tags.join(', '));assessment.value=x.preliminary_assessment||'';when.value=x.appointment_at?toLocalInputValue(x.appointment_at):defaultWhenValue();notes.value=x.teacher_notes||'';medicine.value='';suggestBox.innerHTML='';medSuggestBox.innerHTML='';
@@ -160,10 +162,12 @@ function addTypedMed(){addMed(medicine.value);medicine.value=''}
 function removeSelectedMed(i){selectedMeds.splice(i,1);renderSelectedMeds()}
 function addMedSuggestion(btn){addMed(btn.dataset.name)}
 async function schedule(){
-  // Catch the "half-filled datetime-local" case client-side with a clear
-  // Thai message instead of letting it round-trip to the server and come
-  // back as the generic "กรุณาระบุเวลานัด" error.
-  if(!when.value){alert('กรุณาเลือกวันและเวลานัดหมายให้ครบทั้งสองช่อง (บางเบราว์เซอร์ต้องเลือกช่วงเช้า/บ่ายด้วย ไม่ใช่แค่วันที่)');when.focus();return}
+  if(!when.value){
+    alert('กรุณาเลือกวันและเวลานัดหมายให้ครบทั้งสองช่อง');
+    when.focus();
+    return;
+  }
+  // datetime-local is a school wall-clock value. Send it unchanged.
   await action('schedule',{appointmentAt:when.value,assessment:assessment.value,notes:notes.value});
 }
 async function arrive(){await action('arrive',{});}

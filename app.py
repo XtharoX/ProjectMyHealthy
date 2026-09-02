@@ -1,7 +1,5 @@
 import json, sqlite3, secrets, os, urllib.request, urllib.error, hmac, hashlib, base64
 from pathlib import Path
-from datetime import datetime
-import re
 from functools import wraps
 
 # Load variables from a local .env file (if present) into the environment,
@@ -118,19 +116,19 @@ OPEN_STATUSES = ("PENDING", "SCHEDULED", "ARRIVED")
 CLOSED_STATUSES = ("COMPLETED", "REJECTED", "CANCELLED")
 
 # Appointment times are school wall-clock times in Thailand.
-# Store YYYY-MM-DDTHH:mm without device/browser timezone conversion.
+# They are NOT instants in time, so never convert them through UTC/timezones.
+# Store and return exactly YYYY-MM-DDTHH:mm.
 def normalize_appointment_at(value):
     value = str(value or "").strip()
     if not value:
         return ""
     m = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})", value)
     if m:
-        # Keep the selected wall-clock time exactly as entered.
-        # This also handles legacy values with a timezone suffix by taking
-        # the original displayed wall-clock portion.
         return m.group(1)
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})", value)
+    if m:
+        return f"{m.group(1)}T{m.group(2)}"
     return value[:16]
-
 
 
 def conn():
