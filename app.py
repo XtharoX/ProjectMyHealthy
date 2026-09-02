@@ -1,5 +1,7 @@
 import json, sqlite3, secrets, os, urllib.request, urllib.error, hmac, hashlib, base64
 from pathlib import Path
+from datetime import datetime
+import re
 from functools import wraps
 
 # Load variables from a local .env file (if present) into the environment,
@@ -114,6 +116,22 @@ SAFE_STATIC_EXT = {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".gif",
 
 OPEN_STATUSES = ("PENDING", "SCHEDULED", "ARRIVED")
 CLOSED_STATUSES = ("COMPLETED", "REJECTED", "CANCELLED")
+
+# Appointment times are school wall-clock times in Thailand.
+# Store YYYY-MM-DDTHH:mm without device/browser timezone conversion.
+def normalize_appointment_at(value):
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    m = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})", value)
+    if m:
+        # Keep the selected wall-clock time exactly as entered.
+        # This also handles legacy values with a timezone suffix by taking
+        # the original displayed wall-clock portion.
+        return m.group(1)
+    return value[:16]
+
+
 
 def conn():
     c = sqlite3.connect(DB); c.row_factory = sqlite3.Row; return c
@@ -439,7 +457,7 @@ def diagnose(user):
 @app.post("/api/appointment/<int:aid>/schedule")
 @require("teacher")
 def schedule(user, aid):
-    d = request.get_json() or {}; when = d.get("appointmentAt", "")
+    d = request.get_json() or {}; when = normalize_appointment_at(d.get("appointmentAt", ""))
     if not when:
         return jsonify(error="กรุณาระบุเวลานัด"), 400
     c = conn()

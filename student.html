@@ -51,10 +51,13 @@ const TH_MONTHS=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','�
 // e.g. "ส. 5 ก.ย. 2569 เวลา 14:30 น." instead.
 function fmtDT(v){
   if(!v)return'';
-  let d=new Date(String(v).trim().replace(' ','T'));
+  const s=String(v).trim().replace(' ','T');
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if(!m)return esc(v);
+  const y=Number(m[1]),mo=Number(m[2])-1,day=Number(m[3]);
+  const d=new Date(y,mo,day);
   if(isNaN(d))return esc(v);
-  const p=n=>String(n).padStart(2,'0');
-  return `${TH_DAYS[d.getDay()]} ${d.getDate()} ${TH_MONTHS[d.getMonth()]} ${d.getFullYear()+543} เวลา ${p(d.getHours())}:${p(d.getMinutes())} น.`;
+  return `${TH_DAYS[d.getDay()]} ${day} ${TH_MONTHS[mo]} ${y+543} เวลา ${m[4]}:${m[5]} น.`;
 }
 // As the student types digits, auto-insert "/" after the day and month
 // groups (วว/ดด/ปปปป) so the field always looks like dd/mm/yyyy without the

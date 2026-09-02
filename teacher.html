@@ -107,10 +107,11 @@ function toOffsetISO(localVal){
 // THIS device's own local time - so reopening a case always shows the
 // correct wall-clock time regardless of which device originally scheduled it.
 function toLocalInputValue(iso){
-  let d=new Date(iso);
-  if(isNaN(d))return defaultWhenValue();
-  let p=n=>String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  if(!iso)return defaultWhenValue();
+  const s=String(iso).trim();
+  const m=s.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
+  if(m)return m[1];
+  return defaultWhenValue();
 }
 async function openCase(i){let x=list_cache[i];current=x;mtitle.textContent=x.name+' | '+x.student_id;minfo.innerHTML='<b>⚠️ แพ้ยา:</b> '+esc(x.allergies||'ไม่มีข้อมูล')+'<br><b>อาการ:</b> '+esc(x.tags.join(', '));assessment.value=x.preliminary_assessment||'';when.value=x.appointment_at?toLocalInputValue(x.appointment_at):defaultWhenValue();notes.value=x.teacher_notes||'';medicine.value='';suggestBox.innerHTML='';medSuggestBox.innerHTML='';
   // Reopening an already-closed case (from the ปิดแล้ว/history tab) should
@@ -163,7 +164,7 @@ async function schedule(){
   // Thai message instead of letting it round-trip to the server and come
   // back as the generic "กรุณาระบุเวลานัด" error.
   if(!when.value){alert('กรุณาเลือกวันและเวลานัดหมายให้ครบทั้งสองช่อง (บางเบราว์เซอร์ต้องเลือกช่วงเช้า/บ่ายด้วย ไม่ใช่แค่วันที่)');when.focus();return}
-  await action('schedule',{appointmentAt:toOffsetISO(when.value),assessment:assessment.value,notes:notes.value});
+  await action('schedule',{appointmentAt:when.value,assessment:assessment.value,notes:notes.value});
 }
 async function arrive(){await action('arrive',{});}
 async function rejectCase(){let reason=prompt('เหตุผลที่ปิดเคสโดยไม่รับยา (แจ้งเตือนผิด/ซ้ำ ฯลฯ)','');if(reason===null)return;await action('reject',{reason});}
