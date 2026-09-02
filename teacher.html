@@ -108,11 +108,11 @@ function defaultWhenValue(){let d=new Date(Date.now()+5*60000);d.setSeconds(0,0)
 // "2026-09-02T22:35:00+07:00") that every spec-compliant engine resolves
 // to the exact same moment, no matter which device reads it back.
 function toOffsetISO(localVal){
-  let d=new Date(localVal);
-  if(isNaN(d))return localVal;
-  let offMin=-d.getTimezoneOffset(),sign=offMin>=0?'+':'-',abs=Math.abs(offMin);
-  let p=n=>String(n).padStart(2,'0');
-  return `${localVal}:00${sign}${p(Math.floor(abs/60))}:${p(abs%60)}`;
+  // Appointment times are school wall-clock time in Thailand.
+  // Always store an explicit UTC+07:00 offset so another device/browser
+  // cannot reinterpret the teacher's selected time in a different zone.
+  if(!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$/.test(localVal)) return localVal;
+  return `${localVal}:00+07:00`;
 }
 // Inverse: turn a stored appointment_at (offset-qualified going forward,
 // or a legacy naive string from before this fix) back into the
@@ -175,7 +175,7 @@ function addTypedMed(){addMed(medicine.value);medicine.value=''}
 function removeSelectedMed(i){selectedMeds.splice(i,1);renderSelectedMeds()}
 function addMedSuggestion(btn){addMed(btn.dataset.name)}
 async function schedule(){
-  const appointmentAt=when.value.trim();
+  const appointmentAt=toOffsetISO(when.value.trim());
   if(!appointmentAt){
     alert('กรุณาเลือกวันและเวลานัดหมายให้ครบทั้งสองช่อง');
     when.focus();
