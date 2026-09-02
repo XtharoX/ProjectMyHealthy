@@ -359,6 +359,17 @@ def create_request(user):
         return jsonify(error="กรุณาระบุอาการ"), 400
     if sev not in ("น้อย", "กลาง", "มาก"):
         return jsonify(error="ระดับความรุนแรงไม่ถูกต้อง"), 400
+    # A student may only have ONE open case (PENDING/SCHEDULED/ARRIVED) at a
+    # time. Without this guard, an anxious/impatient student who reports
+    # again while waiting creates a second row - and since the student page
+    # always showed whatever row was created most recently, a teacher
+    # scheduling the OLDER (real) case would silently stop appearing on the
+    # student's screen, because the newer still-PENDING row (with no
+    # appointment_at yet) covered it. This was the root cause of "the
+    # appointment time doesn't update on the student side".
+    if rows("SELECT appointment_id FROM appointments WHERE student_id=? AND status IN (%s)" %
+            ",".join("?" * len(OPEN_STATUSES)), (user["user_id"], *OPEN_STATUSES)):
+        return jsonify(error="คุณมีคำขอที่ยังไม่เสร็จสิ้นอยู่แล้ว กรุณารอการตอบกลับ หรือยกเลิกคำขอเดิมก่อนส่งใหม่"), 409
     c = conn()
     cur = c.execute("INSERT INTO appointments(student_id,symptoms_json,details,severity) VALUES(?,?,?,?)",
                      (user["user_id"], json.dumps(tags, ensure_ascii=False), details, sev))
