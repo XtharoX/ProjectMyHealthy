@@ -335,7 +335,36 @@ def teacher_requests(user):
 @app.get("/api/my/requests")
 @require("student")
 def my_requests(user):
-    out = rows("SELECT * FROM appointments WHERE student_id=? ORDER BY appointment_id DESC", (user["user_id"],))
+    # Always put the student's current scheduled/arrived appointment first.
+    # This is important because the student UI may use the first OPEN case as
+    # its current case. Without this ordering, an older PENDING row can hide
+    # the appointment that the teacher has just scheduled.
+    #
+    # A case is considered the current case only while it is OPEN and has an
+    # appointment time. COMPLETED/CANCELLED/REJECTED rows remain history and
+    # can never take the current-case position.
+    out = rows("""
+        SELECT *
+        FROM appointments
+        WHERE student_id=?
+        ORDER BY
+            CASE
+                WHEN status IN ('SCHEDULED','ARRIVED')
+                     AND appointment_at IS NOT NULL
+                     AND TRIM(appointment_at) <> ''
+                THEN 0
+                WHEN status='PENDING' THEN 1
+                ELSE 2
+            END,
+            CASE
+                WHEN status IN ('SCHEDULED','ARRIVED')
+                     AND appointment_at IS NOT NULL
+                     AND TRIM(appointment_at) <> ''
+                THEN appointment_at
+                ELSE NULL
+            END DESC,
+            appointment_id DESC
+    """, (user["user_id"],))
     for x in out:
         x["tags"] = json.loads(x.pop("symptoms_json"))
     return jsonify(out)
