@@ -1,9 +1,7 @@
 import sqlite3, os
 from pathlib import Path
 
-# Same DB_PATH override as app.py - keep both in sync so db_setup.py
-# initializes the exact file app.py will read/write on hosts like Render
-# where the DB must live on a mounted persistent disk, not next to the code.
+
 DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).with_name("myhealthy.db"))))
 
 SCHEMA = """
@@ -124,9 +122,8 @@ def main():
       ("67890", "นักเรียนตัวอย่าง 2", "ม.5/1", "2009-11-20", "Penicillin", "ผู้ปกครองตัวอย่าง", "")
     ])
     conn.executemany("INSERT OR IGNORE INTO symptoms(symptom) VALUES (?)", [(s,) for s in CANONICAL_SYMPTOMS])
-    # Sample medicines for testing, covering all 10 canonical symptoms so the
-    # teacher-side "narrow down by symptom" suggestion box has something to
-    # show for every symptom a student can report.
+
+ 
     conn.executemany("INSERT OR IGNORE INTO medicines(medicine_name,description) VALUES (?,?)", [
       ("พาราเซตามอล", "ลดไข้ แก้ปวด (ตัวอย่างรายการยา)"),
       ("ยาแก้แพ้", "ลดอาการแพ้ ผื่นคัน (ตัวอย่างรายการยา)"),
