@@ -1,4 +1,4 @@
-import json, sqlite3, secrets, os, urllib.request, urllib.error, hmac, hashlib, base64
+import json, re, sqlite3, secrets, os, urllib.request, urllib.error, hmac, hashlib, base64
 from pathlib import Path
 from functools import wraps
 
