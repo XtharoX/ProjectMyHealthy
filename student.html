@@ -44,12 +44,17 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 // it as a normal Thai dd/mm/yyyy HH:MM, so the student can actually read it
 // and see it change to whatever time the teacher just set.
 const TH_DAYS=['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
+const TH_MONTHS=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+// Thai readers expect the Buddhist Era year (พ.ศ. = ค.ศ.+543) and a named
+// month, not a numeric dd/mm/yyyy string - "05/09/2026" reads as an ID/code
+// and the Gregorian year looks flat-out wrong to a Thai eye. This renders
+// e.g. "ส. 5 ก.ย. 2569 เวลา 14:30 น." instead.
 function fmtDT(v){
   if(!v)return'';
   let d=new Date(String(v).trim().replace(' ','T'));
   if(isNaN(d))return esc(v);
   const p=n=>String(n).padStart(2,'0');
-  return `${TH_DAYS[d.getDay()]} ${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())} น.`;
+  return `${TH_DAYS[d.getDay()]} ${d.getDate()} ${TH_MONTHS[d.getMonth()]} ${d.getFullYear()+543} เวลา ${p(d.getHours())}:${p(d.getMinutes())} น.`;
 }
 // As the student types digits, auto-insert "/" after the day and month
 // groups (วว/ดด/ปปปป) so the field always looks like dd/mm/yyyy without the
@@ -93,6 +98,16 @@ function start(){elLogin.classList.add('hide');elApp.classList.remove('hide');el
   // time still stays current even if real-time updates are unavailable
   // entirely (e.g. blocked by a school network/proxy).
   setInterval(load,20000);
+  // Mobile browsers suspend both the socket connection AND setInterval
+  // timers while the screen is locked or the tab is backgrounded - this is
+  // exactly the case where a teacher schedules a student while their phone
+  // is in their pocket. Without this, the student would see stale/no
+  // appointment info until the next 20s tick happens to land after they
+  // unlock. Force an immediate refresh the moment the page is looked at
+  // again, so the just-scheduled time always shows up right away.
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')load()});
+  window.addEventListener('pageshow',load);
+  window.addEventListener('focus',load);
 }
 async function refreshSymptoms(){try{let r=await fetch(API+'/symptoms',{headers:headers()});if(r.ok){let d=await r.json();if(Array.isArray(d)&&d.length){symptoms=d;renderTags()}}}catch(e){/* keep the fallback list on any network error */}}
 async function send(){let r=await fetch(API+'/request',{method:'POST',headers:headers(),body:JSON.stringify({tags:selected,details:elDetails.value,severity:elSeverity.value})}),d=await r.json();if(!r.ok)return alert(d.error||'ส่งไม่สำเร็จ');selected=[];elDetails.value='';elSeverity.value='';renderTags();load()}
@@ -107,7 +122,12 @@ async function load(){let r=await fetch(API+'/my/requests',{headers:headers()});
   // first, so this still prefers the most recent OPEN case.
   const OPEN=['PENDING','SCHEDULED','ARRIVED'];
   latest=all.find(a=>OPEN.includes(a.status))||all[0];
-  elStatus.innerHTML=!latest?'ยังไม่มีรายการ':`<b>${esc(STATUS_TH[latest.status]||latest.status)}</b><br>${latest.appointment_at?'เวลานัด: '+fmtDT(latest.appointment_at):''}<br>${esc(latest.preliminary_assessment||'')}`;
+  // The appointment time is the single most important thing on this screen
+  // once a teacher has scheduled a slot - give it its own highlighted block
+  // instead of a plain text line, so it can't be mistaken for a status label.
+  const apptBlock=latest&&latest.appointment_at
+    ?`<div class="mt-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2"><div class="text-xs text-blue-500">เวลานัด</div><div class="text-blue-700 font-bold text-lg">${fmtDT(latest.appointment_at)}</div></div>`:'';
+  elStatus.innerHTML=!latest?'ยังไม่มีรายการ':`<b>${esc(STATUS_TH[latest.status]||latest.status)}</b>${apptBlock}${latest.preliminary_assessment?`<div class="mt-2">${esc(latest.preliminary_assessment)}</div>`:''}`;
   elCancelBtn.classList.toggle('hide',!latest||latest.status!=='PENDING');
   elHistory.innerHTML=all.slice(0,10).map(a=>`<div class="border-b pb-2"><b>${esc(STATUS_TH[a.status]||a.status)}</b> · ${esc(a.tags.join(', ')||a.details||'-')} <span class="text-xs text-slate-400">${fmtDT(a.created_at)}</span></div>`).join('')||'<p class="text-slate-400">ไม่มีประวัติ</p>'}
 async function logout(){await fetch(API+'/logout',{method:'POST',headers:headers()});localStorage.removeItem('myhealthy_student_token');location.reload()}
