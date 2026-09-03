@@ -91,10 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_symptom_rules_symptom ON symptom_rules(symptom);
 CREATE INDEX IF NOT EXISTS idx_medicine_symptoms_symptom ON medicine_symptoms(symptom);
 """
 
-# The exact 10 symptoms students can pick from in student.html. Kept as a
-# single source of truth here so the medicine-tagging checkboxes in the
-# teacher UI can never drift out of sync with what students actually submit.
-# If you ever add a symptom to student.html's `symptoms` list, add it here too.
+
 CANONICAL_SYMPTOMS = ['ปวดหัว','ตัวร้อน','มีไข้','ปวดท้อง','ท้องเสีย','เจ็บคอ','ไอ','เวียนหัว','ผื่นคัน','บาดเจ็บ/มีแผล']
 
 def migrate_columns(conn):
@@ -110,9 +107,7 @@ def main():
     conn.executescript(SCHEMA)
     migrate_columns(conn)
 
-    # NOTE: notifications.status used to default to 'PENDING'; the app now uses
-    # 'PENDING_APPROVAL' consistently. Migrate any old rows quietly if this DB
-    # already existed from a previous version.
+   
     conn.execute("UPDATE notifications SET status='PENDING_APPROVAL' WHERE status='PENDING'")
 
     conn.executemany("""INSERT OR IGNORE INTO students
@@ -133,7 +128,7 @@ def main():
       ("ผงเกลือแร่ (ORS)", "ทดแทนน้ำและเกลือแร่เมื่อท้องเสีย (ตัวอย่างรายการยา)"),
       ("ยาดม", "บรรเทาอาการเวียนหัว (ตัวอย่างรายการยา)"),
       ("เบตาดีนและพลาสเตอร์ปิดแผล", "ทำความสะอาดและปิดแผล (ตัวอย่างรายการยา)")])
-    # Sample symptom mapping so the "คลังยา" tab isn't empty on first run.
+    
     conn.executemany("""INSERT OR IGNORE INTO medicine_symptoms(medicine_id,symptom)
       SELECT medicine_id,? FROM medicines WHERE medicine_name=?""", [
       ("ปวดหัว", "พาราเซตามอล"), ("มีไข้", "พาราเซตามอล"), ("ตัวร้อน", "พาราเซตามอล"),
