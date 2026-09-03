@@ -2,12 +2,7 @@ import json, re, sqlite3, secrets, os, urllib.request, urllib.error, hmac, hashl
 from pathlib import Path
 from functools import wraps
 
-# Load variables from a local .env file (if present) into the environment,
-# so LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_SECRET / SECRET_KEY etc. don't
-# need to be re-exported in every new terminal session. Safe to keep this
-# even in production: if no .env file exists (e.g. on Render, which uses
-# its own Environment tab), this is simply a no-op and real env vars set by
-# the host still take priority.
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -18,31 +13,18 @@ from flask_socketio import SocketIO, emit, join_room
 from werkzeug.security import generate_password_hash, check_password_hash
 
 BASE = Path(__file__).parent
-# DB_PATH env var lets the database live outside the app folder - needed on
-# hosts like Render where the app's own filesystem is wiped on every deploy,
-# so the DB must sit on a mounted persistent disk instead (e.g. /var/data).
-# Unset (the normal local case) it stays right next to app.py as before.
+
 DB = Path(os.getenv("DB_PATH", str(BASE/"myhealthy.db")))
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", secrets.token_hex(32))
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
-# LINE Messaging API channel access token, set as an environment variable at
-# deploy time (never in the DB or in source) - e.g.:
-#   export LINE_CHANNEL_ACCESS_TOKEN="...."   (macOS/Linux)
-#   $env:LINE_CHANNEL_ACCESS_TOKEN="...."     (Windows PowerShell)
-# If this is unset, guardian-LINE push is simply skipped and the app falls
-# back to the existing "teacher copies the approved message manually" flow -
-# nothing else about the app changes or breaks.
+
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
 LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
 LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 
-# Channel *secret* (different from the access token above) - used only to
-# verify that an incoming webhook request genuinely came from LINE, via the
-# X-Line-Signature header. Never accept webhook bodies without this check:
-# without it, anyone who finds the webhook URL could link arbitrary LINE
-# accounts to arbitrary students.
+
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "").strip()
 
 def send_line_push(to_user_id, message):
@@ -106,18 +88,14 @@ def verify_line_signature(raw_body: bytes, signature: str) -> bool:
     expected = base64.b64encode(mac).decode("utf-8")
     return hmac.compare_digest(expected, signature)
 
-# Only these extensions may ever be served as static files from BASE.
-# This keeps app.py / db_setup.py / myhealthy.db / requirements.txt / README.md
-# from being downloadable by anyone who guesses the filename.
+
 SAFE_STATIC_EXT = {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".gif",
                     ".svg", ".ico", ".woff", ".woff2", ".webmanifest"}
 
 OPEN_STATUSES = ("PENDING", "SCHEDULED", "ARRIVED")
 CLOSED_STATUSES = ("COMPLETED", "REJECTED", "CANCELLED")
 
-# Appointment times are school wall-clock times in Thailand.
-# They are NOT instants in time, so never convert them through UTC/timezones.
-# Store and return exactly YYYY-MM-DDTHH:mm.
+
 def normalize_appointment_at(value):
     value = str(value or "").strip()
     if not value:
@@ -201,22 +179,15 @@ def broadcast(event, data, student_id=None):
     if student_id:
         socketio.emit(event, data, room=f"student:{student_id}")
 
-# ---------- static files ----------
 
 @app.get("/")
 def home():
-    # Serve the unified login page (role picker: student/teacher) at the
-    # site root instead of hardcoding student.html, so teachers no longer
-    # need to know to go to a separate URL. teacher.html/student.html are
-    # still reachable directly (via the catch-all route below) for anyone
-    # with them bookmarked.
+  
     return send_from_directory(BASE, "index.html")
 
 @app.get("/<path:p>")
 def serve_file(p):
-    # Whitelist-based static file serving. Anything not explicitly a
-    # front-end asset (html/css/js/images/fonts) is rejected, so source
-    # files and the database can never be downloaded through the browser.
+
     fp = (BASE / p).resolve()
     try:
         fp.relative_to(BASE.resolve())
@@ -226,7 +197,6 @@ def serve_file(p):
         abort(404)
     return send_from_directory(BASE, p)
 
-# ---------- auth ----------
 
 @app.post("/api/student/login")
 def student_login():
@@ -263,11 +233,6 @@ def logout():
 
 @app.post("/api/bootstrap-teacher")
 def bootstrap():
-    # Only works while there is no teacher account yet. Also sets the shared
-    # "access code" that must be entered on every teacher login, on top of
-    # username/password, so students who see a teacher typing their password
-    # over their shoulder still can't get in without the code the school
-    # keeps separately.
     if rows("SELECT teacher_id FROM teacher_accounts LIMIT 1"):
         return jsonify(error="ตั้งค่าบัญชีแล้ว"), 403
     d = request.get_json() or {}
@@ -288,9 +253,7 @@ def bootstrap():
 @app.post("/api/teacher/access-code")
 @require("teacher")
 def rotate_access_code(user):
-    # Lets an existing teacher rotate the shared access code (e.g. every
-    # semester, or immediately if it may have leaked) without needing
-    # server/file access.
+    
     d = request.get_json() or {}
     current_password = d.get("currentPassword", "")
     new_code = str(d.get("newAccessCode", "")).strip()
@@ -303,7 +266,7 @@ def rotate_access_code(user):
     audit(user, "ROTATE_ACCESS_CODE", "settings", "teacher_access_code_hash")
     return jsonify(ok=True)
 
-# ---------- appointments ----------
+
 
 @app.get("/api/requests")
 @require("teacher")
@@ -316,14 +279,7 @@ def teacher_requests(user):
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         sql += " WHERE a.status IN (%s)" % ",".join("?" * len(statuses))
         args.extend(statuses)
-    # The open queue (PENDING/SCHEDULED/ARRIVED) should triage by severity
-    # first so the most urgent case is always on top. But that same rule
-    # applied to the CLOSED history tab (COMPLETED/REJECTED/CANCELLED) meant
-    # a high-severity case stayed pinned at the top forever, and ties broke
-    # on created_at (when the case was first opened) instead of when it was
-    # actually closed - so a case closed just now could still land in the
-    # middle of the list. History should simply read most-recently-closed
-    # first, so use closed_at there instead of the severity/created_at rule.
+   
     if statuses and all(s in CLOSED_STATUSES for s in statuses):
         sql += " ORDER BY a.closed_at DESC, a.appointment_id DESC"
     else:
@@ -331,11 +287,7 @@ def teacher_requests(user):
     out = rows(sql, args)
     for x in out:
         x["tags"] = json.loads(x.pop("symptoms_json"))
-    # Attach whatever was actually dispensed for each case. This was tracked
-    # in appointment_medicines from the start (complete() already inserts
-    # into it), but /api/requests never selected it back out - so a closed
-    # case's medicine never had anywhere to surface in the teacher UI, even
-    # though it was sitting in the database the whole time.
+    
     if out:
         ids = [x["appointment_id"] for x in out]
         meds_by_appt = {}
@@ -351,14 +303,7 @@ def teacher_requests(user):
 @app.get("/api/my/requests")
 @require("student")
 def my_requests(user):
-    # Always put the student's current scheduled/arrived appointment first.
-    # This is important because the student UI may use the first OPEN case as
-    # its current case. Without this ordering, an older PENDING row can hide
-    # the appointment that the teacher has just scheduled.
-    #
-    # A case is considered the current case only while it is OPEN and has an
-    # appointment time. COMPLETED/CANCELLED/REJECTED rows remain history and
-    # can never take the current-case position.
+    
     out = rows("""
         SELECT *
         FROM appointments
@@ -391,12 +336,7 @@ def create_request(user):
     d = request.get_json() or {}
     raw_tags = d.get("tags", [])
     details = str(d.get("details", ""))[:1000]; sev = d.get("severity")
-    # Defense in depth: the front end only ever sends short strings picked
-    # from a fixed symptom list, but nothing stops a client from calling
-    # this endpoint directly with something else (e.g. HTML/script content
-    # meant to run in the teacher's browser once rendered in the queue).
-    # Force every tag to a short, plain string so nothing but ordinary text
-    # ever reaches the database or gets rendered on the teacher/student UI.
+   
     if not isinstance(raw_tags, list):
         return jsonify(error="รูปแบบอาการไม่ถูกต้อง"), 400
     tags = [str(t).strip()[:60] for t in raw_tags if str(t).strip()][:20]
@@ -404,14 +344,7 @@ def create_request(user):
         return jsonify(error="กรุณาระบุอาการ"), 400
     if sev not in ("น้อย", "กลาง", "มาก"):
         return jsonify(error="ระดับความรุนแรงไม่ถูกต้อง"), 400
-    # A student may only have ONE open case (PENDING/SCHEDULED/ARRIVED) at a
-    # time. Without this guard, an anxious/impatient student who reports
-    # again while waiting creates a second row - and since the student page
-    # always showed whatever row was created most recently, a teacher
-    # scheduling the OLDER (real) case would silently stop appearing on the
-    # student's screen, because the newer still-PENDING row (with no
-    # appointment_at yet) covered it. This was the root cause of "the
-    # appointment time doesn't update on the student side".
+    
     if rows("SELECT appointment_id FROM appointments WHERE student_id=? AND status IN (%s)" %
             ",".join("?" * len(OPEN_STATUSES)), (user["user_id"], *OPEN_STATUSES)):
         return jsonify(error="คุณมีคำขอที่ยังไม่เสร็จสิ้นอยู่แล้ว กรุณารอการตอบกลับ หรือยกเลิกคำขอเดิมก่อนส่งใหม่"), 409
@@ -426,9 +359,7 @@ def create_request(user):
 @app.post("/api/appointment/<int:aid>/cancel")
 @require("student")
 def cancel_request(user, aid):
-    # A student may withdraw their own request, but only while it's still
-    # PENDING - once a teacher has scheduled or seen them it must be handled
-    # by the teacher (reject) instead, so nothing quietly disappears mid-flow.
+   
     c = conn()
     r = c.execute("SELECT student_id,status FROM appointments WHERE appointment_id=?", (aid,)).fetchone()
     if not r or r["student_id"] != user["user_id"]:
@@ -489,8 +420,7 @@ def arrive(user, aid):
 @app.post("/api/appointment/<int:aid>/reject")
 @require("teacher")
 def reject(user, aid):
-    # For false alarms / duplicates / cases handled outside the system, so
-    # they don't sit in the PENDING queue forever.
+    
     d = request.get_json() or {}; reason = str(d.get("reason", ""))[:500]
     c = conn()
     r = c.execute("SELECT student_id,status FROM appointments WHERE appointment_id=?", (aid,)).fetchone()
@@ -526,9 +456,7 @@ def complete(user, aid):
                        (aid, name, str(m.get("instruction", ""))[:500], user["user_id"]))
             given_names.append(name)
     symptoms = ", ".join(json.loads(r["symptoms_json"]))
-    # The dispensed medicine list was built above but never made it into the
-    # guardian message - a teacher could pick a medicine, close the case, and
-    # the resulting notification would say nothing about what was given.
+   
     meds_line = f" ได้รับยา: {', '.join(given_names)}." if given_names else ""
     msg = f"นักเรียนเข้ารับบริการห้องพยาบาล เนื่องจากมีอาการ: {symptoms or r['details']}.{meds_line} ได้รับการดูแลเรียบร้อยแล้ว"
     c.execute("INSERT INTO notifications(appointment_id,recipient_type,message,status) VALUES(?,?,?,?)",
@@ -538,7 +466,7 @@ def complete(user, aid):
     broadcast("appointment_update", {"id": aid, "status": "COMPLETED"}, r["student_id"])
     return jsonify(ok=True, guardianMessage=msg, allergyNote=allergies)
 
-# ---------- notifications (the "pending approval" queue actually surfaced) ----------
+
 
 @app.get("/api/notifications")
 @require("teacher")
@@ -554,12 +482,7 @@ def list_notifications(user):
 @app.post("/api/notifications/<int:nid>/approve")
 @require("teacher")
 def approve_notification(user, nid):
-    # Teacher reviews (and may edit) the auto-drafted message. Approving it
-    # tries to push it to the guardian's LINE immediately; if that isn't
-    # possible (no LINE User ID on file yet, token not configured, or the
-    # LINE API call fails) the message is still marked approved/SENT and the
-    # teacher falls back to sending it manually through whatever channel the
-    # school uses - approval never silently fails just because LINE did.
+   
     d = request.get_json() or {}
     message = str(d.get("message", "")).strip()
     r = rows("""SELECT n.*,s.guardian_line_user_id FROM notifications n
@@ -598,7 +521,6 @@ def reject_notification(user, nid):
     audit(user, "REJECT", "notification", nid, reason)
     return jsonify(ok=True)
 
-# ---------- students & medicines ----------
 
 @app.get("/api/student/<sid>")
 @require("teacher")
@@ -609,10 +531,7 @@ def student(user, sid):
 @app.post("/api/student/<sid>/line")
 @require("teacher")
 def set_guardian_line(user, sid):
-    # Manual linking: the school has parents add the school's LINE OA and
-    # send their LINE User ID in, and a teacher pastes it in here once. This
-    # app has no LINE Login flow of its own, so this is the deliberate,
-    # explicit way a guardian gets connected - never inferred or guessed.
+    
     d = request.get_json() or {}
     line_id = str(d.get("lineUserId", "")).strip()[:64]
     if not rows("SELECT 1 FROM students WHERE student_id=?", (sid,)):
@@ -623,27 +542,14 @@ def set_guardian_line(user, sid):
 
 @app.post("/api/line/webhook")
 def line_webhook():
-    # Self-service alternative to the manual "teacher pastes in the User ID"
-    # flow above: a guardian messages the school's LINE OA with their
-    # child's student ID and date of birth (the same two facts that gate
-    # student login), and this webhook links their LINE account
-    # automatically - no teacher involvement needed.
-    #
-    # Signature verification is mandatory, not optional: without it, anyone
-    # who discovers this URL could POST fake events and link an arbitrary
-    # LINE account to an arbitrary student, letting that account both read
-    # what the school sends about that student and appear to be the parent
-    # of a child that isn't theirs. If LINE_CHANNEL_SECRET isn't configured,
-    # every request is rejected rather than trusted.
+   
     raw = request.get_data()
     if not verify_line_signature(raw, request.headers.get("X-Line-Signature", "")):
         abort(403)
     payload = request.get_json(silent=True) or {}
     for ev in payload.get("events", []):
         if ev.get("type") == "follow":
-            # Guardian just added the school's OA for the first time - give
-            # them the instructions up front instead of leaving them to
-            # guess what to send.
+            
             send_line_reply(ev.get("replyToken"),
                 "สวัสดีค่ะ/ครับ 👋 ยินดีต้อนรับสู่ระบบแจ้งเตือนห้องพยาบาล\n\n"
                 "กรุณาพิมพ์ เลขประจำตัวนักเรียน และ วันเกิด ของบุตรหลาน คั่นด้วยเว้นวรรค เพื่อผูกบัญชี LINE นี้ไว้รับการแจ้งเตือน\n"
@@ -682,30 +588,22 @@ def line_webhook():
 @app.get("/api/students")
 @require("teacher")
 def list_students(user):
-    # Full active-student roster for the "รายชื่อนักเรียน" tab, so a teacher
-    # can link a guardian's LINE User ID up front instead of waiting for
-    # that student's first appointment to open the case modal.
+    
     return jsonify(rows("""SELECT student_id,name,class_name,guardian_name,guardian_contact,guardian_line_user_id
                             FROM students WHERE is_active=1 ORDER BY class_name,name"""))
 
-# ---------- symptoms (canonical list, used to tag medicines unambiguously) ----------
+
 
 @app.get("/api/symptoms")
 @require(None)
 def symptoms_list(user):
-    # Open to both roles (not just teacher): students need this same list to
-    # report symptoms, so the two sides never drift apart the way a
-    # hardcoded copy in student.html used to risk.
+    
     return jsonify([r["symptom"] for r in rows("SELECT symptom FROM symptoms ORDER BY rowid")])
 
 @app.post("/api/symptoms")
 @require("teacher")
 def add_symptom(user):
-    # Lets a teacher extend the canonical symptom list on the fly (e.g. a
-    # symptom that keeps coming up but isn't one of the original 10) instead
-    # of needing someone to edit db_setup.py and redeploy. Newly added
-    # symptoms immediately become available both for tagging medicines here
-    # and for students to pick when reporting - same table, same endpoint.
+ 
     d = request.get_json() or {}
     name = str(d.get("symptom", "")).strip()
     if not name:
@@ -735,9 +633,7 @@ def medicines(user):
     return jsonify(meds)
 
 def _set_medicine_symptoms(c, mid, symptom_list):
-    # Only symptoms that exist in the canonical `symptoms` table are ever
-    # stored - anything else (typo, free text someone slipped past the UI)
-    # is silently dropped rather than creating a new, uncontrolled tag.
+
     valid = {r[0] for r in c.execute("SELECT symptom FROM symptoms").fetchall()}
     clean = sorted({s for s in symptom_list if s in valid})
     c.execute("DELETE FROM medicine_symptoms WHERE medicine_id=?", (mid,))
@@ -769,9 +665,7 @@ def add_medicine(user):
 @app.post("/api/medicines/<int:mid>/symptoms")
 @require("teacher")
 def update_medicine_symptoms(user, mid):
-    # Lets a teacher retag an existing medicine's matched symptoms without
-    # deleting and recreating it (which would also orphan its dispensing
-    # history in appointment_medicines).
+
     d = request.get_json() or {}
     raw_symptoms = d.get("symptoms", [])
     if not isinstance(raw_symptoms, list):
@@ -791,7 +685,6 @@ def deactivate_medicine(user, mid):
     audit(user, "DEACTIVATE", "medicine", mid)
     return jsonify(ok=True)
 
-# ---------- websocket ----------
 
 @socketio.on("connect")
 def ws_connect(auth_data):
@@ -808,11 +701,5 @@ if __name__ == "__main__":
     auto_bootstrap_teacher()
     port = int(os.getenv("PORT", 5000))
     print(f"MyHealthy: http://localhost:{port}")
-    # Newer Werkzeug (3.1+) refuses to run its dev server outside debug mode
-    # unless explicitly told to. This app is meant to run on a school's own
-    # LAN (not exposed to the internet), so the built-in server is fine here;
-    # allow_unsafe_werkzeug silences that guard instead of the app crashing
-    # on startup with recent dependency versions. On a host like Render,
-    # PORT is injected by the platform and must be what we bind to - a
-    # hardcoded port will fail health checks there.
+   
     socketio.run(app, host="0.0.0.0", port=port, debug=False, allow_unsafe_werkzeug=True)
